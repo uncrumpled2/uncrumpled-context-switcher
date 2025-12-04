@@ -36,6 +36,7 @@
 #load "config/validator.jai";
 #load "events/module.jai";
 #load "server.jai";
+#load "platform/module.jai";
 
 // Version information
 VERSION_MAJOR :: 0;
@@ -66,6 +67,7 @@ Daemon_Config :: struct {
     show_help: bool;
     show_version: bool;
     verbose: bool;
+    systemd_socket: bool;  // Use systemd socket activation
 
     // Parsed state
     has_error: bool;
@@ -85,13 +87,23 @@ init_default_config :: () -> Daemon_Config {
     config: Daemon_Config;
     config.run_as_daemon = false;
     config.stay_in_foreground = false;
-    config.config_path = DEFAULT_CONFIG_PATH;
-    config.socket_path = DEFAULT_SOCKET_PATH;
-    config.pid_file = DEFAULT_PID_FILE;
     config.show_help = false;
     config.show_version = false;
     config.verbose = false;
+    config.systemd_socket = false;
     config.has_error = false;
+
+    // Use XDG-compliant paths on Linux
+    #if OS == .LINUX {
+        config.config_path = get_uncrumpled_config_path();
+        config.socket_path = get_uncrumpled_socket_path();
+        config.pid_file = get_uncrumpled_pid_path();
+    } else {
+        config.config_path = DEFAULT_CONFIG_PATH;
+        config.socket_path = DEFAULT_SOCKET_PATH;
+        config.pid_file = DEFAULT_PID_FILE;
+    }
+
     return config;
 }
 
@@ -137,6 +149,8 @@ parse_arguments :: (args: [] string) -> Daemon_Config {
                 config.has_error = true;
                 config.error_message = "--pid-file requires a path argument";
             }
+        } else if arg == "--systemd-socket" {
+            config.systemd_socket = true;
         } else if begins_with(arg, "-") {
             config.has_error = true;
             config.error_message = tprint("Unknown option: %", arg);
@@ -168,19 +182,30 @@ Options:
   -V, --verbose        Enable verbose logging
 
   --config FILE        Path to configuration file
-                       (default: ~/.config/uncrumpled/config.toml)
+                       (default: $XDG_CONFIG_HOME/uncrumpled/config.toml)
 
   --socket-path PATH   Path to Unix domain socket
-                       (default: /tmp/uncrumpled.sock)
+                       (default: $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.sock)
 
   --pid-file PATH      Path to PID file
-                       (default: /tmp/uncrumpled.pid)
+                       (default: $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.pid)
+
+  --systemd-socket     Use socket passed by systemd socket activation
+                       (for use with systemd socket units)
 
 Examples:
   uncrumpled-daemon                    Run in foreground with defaults
   uncrumpled-daemon -d                 Run as a background daemon
   uncrumpled-daemon -d -V              Daemonize with verbose logging
   uncrumpled-daemon --socket-path /var/run/uncrumpled.sock
+
+systemd Integration:
+  To run as a systemd user service:
+    systemctl --user enable uncrumpled
+    systemctl --user start uncrumpled
+
+  To view logs:
+    journalctl --user -u uncrumpled -f
 
 For more information, visit: https://github.com/uncrumpled/context-switcher
 END
@@ -365,6 +390,26 @@ daemonize :: () -> bool {
     }
 }
 
+// Helper to extract parent directory from a path
+get_socket_directory :: (path: string) -> string {
+    // Find the last path separator
+    last_sep := -1;
+    for i: 0..path.count-1 {
+        if path[i] == #char "/" {
+            last_sep = i;
+        }
+    }
+
+    if last_sep <= 0 {
+        return "";
+    }
+
+    result: string;
+    result.data = path.data;
+    result.count = last_sep;
+    return result;
+}
+
 // Global daemon server instance
 daemon_server: Daemon_Server;
 
@@ -378,11 +423,53 @@ run_daemon :: (config: *Daemon_Config) {
     log("Socket path: %", config.socket_path);
     log("Config path: %", config.config_path);
 
+    // Check for systemd socket activation (Linux only)
+    systemd_fd: s32 = -1;
+    #if OS == .LINUX {
+        if config.systemd_socket {
+            systemd_fd = get_systemd_socket_fd();
+            if systemd_fd >= 0 {
+                log("Using systemd socket activation (fd=%)", systemd_fd);
+                clear_systemd_listen_vars();
+            } else {
+                log_warning("--systemd-socket specified but no socket passed by systemd");
+            }
+        } else {
+            // Auto-detect socket activation even without flag
+            fd_count := is_systemd_socket_activated();
+            if fd_count > 0 {
+                systemd_fd = SD_LISTEN_FDS_START;
+                log("Auto-detected systemd socket activation (fd=%)", systemd_fd);
+                clear_systemd_listen_vars();
+            }
+        }
+    }
+
+    // Ensure runtime directory exists for socket (Linux only)
+    #if OS == .LINUX {
+        if systemd_fd < 0 {  // Only if not using systemd socket
+            // Extract parent directory from socket path
+            socket_dir := get_socket_directory(config.socket_path);
+            if socket_dir.count > 0 {
+                if !ensure_directory(socket_dir) {
+                    log_warning("Could not create socket directory: %", socket_dir);
+                }
+            }
+        }
+    }
+
     // Setup signal handlers
     setup_signal_handlers();
 
     // Write PID file
     if config.pid_file.count > 0 {
+        // Ensure PID file directory exists
+        #if OS == .LINUX {
+            pid_dir := get_socket_directory(config.pid_file);
+            if pid_dir.count > 0 {
+                ensure_directory(pid_dir);
+            }
+        }
         if !write_pid_file(config.pid_file) {
             log_error("Failed to write PID file, continuing anyway");
         }
@@ -401,7 +488,7 @@ run_daemon :: (config: *Daemon_Config) {
     }
 
     // Initialize the daemon server
-    if !init_daemon_server(*daemon_server, config.socket_path, *user_config) {
+    if !init_daemon_server(*daemon_server, config.socket_path, *user_config, systemd_fd) {
         log_error("Failed to initialize daemon server");
         if config_loaded free_user_config(*user_config);
         return;
@@ -416,6 +503,14 @@ run_daemon :: (config: *Daemon_Config) {
     }
 
     log("Daemon initialized, listening on %", config.socket_path);
+
+    // Notify systemd we're ready (Linux only)
+    #if OS == .LINUX {
+        if notify_systemd_ready() {
+            log("Notified systemd: READY");
+        }
+    }
+
     log("Entering main loop...");
 
     // Main event loop

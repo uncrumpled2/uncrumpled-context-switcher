@@ -1,0 +1,41 @@
+# Uncrumpled Context Switcher - Socket-Activated Service
+#
+# This service variant is started via socket activation.
+# The systemd socket unit (uncrumpled.socket) passes the socket FD.
+#
+# See uncrumpled.socket for installation instructions.
+
+[Unit]
+Description=Uncrumpled Context Switcher Daemon (Socket Activated)
+Documentation=https://github.com/uncrumpled/context-switcher
+Requires=uncrumpled.socket
+After=uncrumpled.socket
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/uncrumpled-daemon --foreground --systemd-socket
+ExecReload=/bin/kill -HUP $MAINPID
+
+# Accept socket from systemd
+StandardInput=socket
+
+# Use runtime directory from socket unit
+RuntimeDirectory=uncrumpled
+RuntimeDirectoryMode=0700
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=128M
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ReadWritePaths=%h/.config/uncrumpled
+
+[Install]
+WantedBy=default.target

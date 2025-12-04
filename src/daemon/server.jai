@@ -73,15 +73,25 @@ Message_Buffer :: struct {
 // ============================================================================
 
 // Initialize the daemon server with all components
-init_daemon_server :: (server: *Daemon_Server, socket_path: string, config: *User_Config) -> bool {
+// systemd_fd: Pass >= 0 if using systemd socket activation, -1 otherwise
+init_daemon_server :: (server: *Daemon_Server, socket_path: string, config: *User_Config, systemd_fd: s32 = -1) -> bool {
     if server.initialized return false;
 
     init(*server.mutex);
 
     // Initialize IPC server
-    if !init_ipc_server(*server.ipc_server, socket_path) {
-        destroy(*server.mutex);
-        return false;
+    if systemd_fd >= 0 {
+        // Use systemd-passed socket
+        if !init_ipc_server_with_fd(*server.ipc_server, systemd_fd, socket_path) {
+            destroy(*server.mutex);
+            return false;
+        }
+    } else {
+        // Create our own socket
+        if !init_ipc_server(*server.ipc_server, socket_path) {
+            destroy(*server.mutex);
+            return false;
+        }
     }
 
     // Initialize state stores

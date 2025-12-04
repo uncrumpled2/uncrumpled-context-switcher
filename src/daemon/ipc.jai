@@ -112,6 +112,34 @@ init_ipc_server :: (server: *IPC_Server, socket_path: string) -> bool {
     return true;
 }
 
+// Initialize IPC server with a pre-existing file descriptor (for systemd socket activation)
+init_ipc_server_with_fd :: (server: *IPC_Server, fd: s32, socket_path: string) -> bool {
+    if server.initialized {
+        return false;  // Already initialized
+    }
+
+    init(*server.mutex);
+
+    server.socket_path = copy_string(socket_path);
+    server.server_fd = fd;  // Use the passed-in fd
+    server.initialized = true;
+    server.running = false;
+    server.connection_count = 0;
+    server.next_connection_id = 1;
+    server.total_connections = 0;
+    server.total_bytes_received = 0;
+    server.total_bytes_sent = 0;
+
+    // Initialize all connections as disconnected
+    for *conn: server.connections {
+        conn.id = 0;
+        conn.fd = -1;
+        conn.state = .DISCONNECTED;
+    }
+
+    return true;
+}
+
 // Destroy IPC server
 destroy_ipc_server :: (server: *IPC_Server) {
     if !server.initialized return;
@@ -370,6 +398,15 @@ ipc_poll :: (fds: *pollfd, nfds: u64, timeout: s32) -> s32 #foreign libc "poll";
 
 // Start Unix domain socket server
 start_unix_server :: (server: *IPC_Server) -> bool {
+    // Check if we already have a socket fd (from systemd socket activation)
+    if server.server_fd >= 0 {
+        // Socket already exists - just set non-blocking and start running
+        flags := ipc_fcntl_get(server.server_fd, F_GETFL);
+        ipc_fcntl_set(server.server_fd, F_SETFL, flags | O_NONBLOCK);
+        server.running = true;
+        return true;
+    }
+
     // Remove existing socket file if present
     unlink(ipc_to_c_string(server.socket_path));
 
