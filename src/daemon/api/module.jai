@@ -6,7 +6,7 @@
 // - Service registration (service.*)
 // - Subscription management (subscribe, unsubscribe)
 // - Handshake & version negotiation (handshake)
-// - Preview operations (preview.*) - TODO
+// - Preview operations (preview.*)
 // - Log queries (logs.*) - TODO
 
 // Dependencies - these must be loaded/imported before loading this module:
@@ -19,3 +19,4 @@
 #load "service.jai";
 #load "subscription.jai";
 #load "handshake.jai";
+#load "preview.jai";
