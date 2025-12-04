@@ -594,7 +594,8 @@ load_user_config :: () -> User_Config, bool {
         default_path :: "%APPDATA%\\uncrumpled\\config.toml";
     }
 
-    return parse_config_file(default_path);
+    config, success := parse_config_file(default_path);
+    return config, success;
 }
 
 // Load config from a specific path, falling back to defaults if not found

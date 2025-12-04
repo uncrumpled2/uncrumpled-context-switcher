@@ -24,6 +24,18 @@
 #import "String";
 #import "File";
 #import "POSIX";
+#import "Thread";
+#import "Hash_Table";
+
+// Load daemon modules (they import their own dependencies like jason, jai-toml-c)
+#load "context_store.jai";
+#load "ipc.jai";
+#load "rpc/module.jai";
+#load "api/module.jai";
+#load "config/module.jai";
+#load "config/validator.jai";
+#load "events/module.jai";
+#load "server.jai";
 
 // Version information
 VERSION_MAJOR :: 0;
@@ -353,6 +365,9 @@ daemonize :: () -> bool {
     }
 }
 
+// Global daemon server instance
+daemon_server: Daemon_Server;
+
 // Main daemon loop
 run_daemon :: (config: *Daemon_Config) {
     daemon_state.running = true;
@@ -373,33 +388,76 @@ run_daemon :: (config: *Daemon_Config) {
         }
     }
 
-    // TODO: Load configuration
-    // TODO: Initialize context store
-    // TODO: Initialize IPC layer
-    // TODO: Start listening for connections
+    // Load configuration file
+    expanded_config_path := expand_path(config.config_path);
+    defer free(expanded_config_path);
 
-    log("Daemon initialized, entering main loop");
+    user_config, config_loaded := parse_config_file(expanded_config_path);
+    if !config_loaded {
+        log_warning("Could not load config file '%', using defaults", config.config_path);
+        user_config = create_default_config();
+    } else {
+        log("Loaded configuration from %", config.config_path);
+    }
+
+    // Initialize the daemon server
+    if !init_daemon_server(*daemon_server, config.socket_path, *user_config) {
+        log_error("Failed to initialize daemon server");
+        if config_loaded free_user_config(*user_config);
+        return;
+    }
+
+    // Start listening for connections
+    if !start_daemon_server(*daemon_server) {
+        log_error("Failed to start daemon server");
+        destroy_daemon_server(*daemon_server);
+        if config_loaded free_user_config(*user_config);
+        return;
+    }
+
+    log("Daemon initialized, listening on %", config.socket_path);
+    log("Entering main loop...");
 
     // Main event loop
     while daemon_state.running {
         // Check for reload request
         if daemon_state.reload_requested {
             log("Reload requested, reloading configuration...");
-            // TODO: Reload configuration
+            // Reload config file
+            new_config, reload_success := parse_config_file(expanded_config_path);
+            if reload_success {
+                if config_loaded free_user_config(*user_config);
+                user_config = new_config;
+                config_loaded = true;
+                log("Configuration reloaded successfully");
+            } else {
+                free_user_config(*new_config);
+                log_warning("Failed to reload config, keeping existing");
+            }
             daemon_state.reload_requested = false;
         }
 
-        // TODO: Process IPC events
-        // TODO: Handle client connections
-        // TODO: Dispatch notifications
-
-        // For now, just sleep to avoid busy-waiting
-        sleep_milliseconds(100);
+        // Run one iteration of the server loop (100ms timeout)
+        if !run_server_iteration(*daemon_server, 100) {
+            break;
+        }
     }
 
     log("Shutdown signal received");
 
-    // Cleanup
+    // Print final statistics
+    stats := get_server_stats(*daemon_server);
+    log("Final stats: % requests, % responses, % errors", stats.total_requests, stats.total_responses, stats.total_errors);
+    log("Network: % bytes received, % bytes sent", stats.bytes_received, stats.bytes_sent);
+
+    // Cleanup server
+    stop_daemon_server(*daemon_server);
+    destroy_daemon_server(*daemon_server);
+
+    // Free config
+    if config_loaded free_user_config(*user_config);
+
+    // Cleanup remaining resources
     cleanup(config);
 }
 
