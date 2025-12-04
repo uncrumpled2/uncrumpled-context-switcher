@@ -5,6 +5,9 @@
 #run build();
 
 build :: () {
+    // Disable output for the build script workspace itself
+    set_build_options_dc(.{do_output = false});
+
     w := compiler_create_workspace("Uncrumpled Switcher");
     if !w {
         print("Workspace creation failed.\n");

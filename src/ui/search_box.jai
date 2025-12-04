@@ -19,7 +19,7 @@ handle_text_input :: (box: *Search_Box, event: SDL_Event) {
         // Note: In a real app, handle UTF-8 properly with a buffer
         // Here assuming simple ASCII/partial for skeleton
         input_str := to_string(cast(*u8)event.text.text.data);
-        new_text := sprint("%%", box.text, input_str); 
+        new_text := sprint("%1%2", box.text, input_str); 
         // Warning: sprint allocates, need to manage memory in real app or use a Builder
         // For this skeleton, we'll let it leak or assume global allocator handles it briefly
         box.text = new_text;

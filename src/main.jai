@@ -50,7 +50,8 @@ main :: () {
     
     results_list: Results_List;
     init_results_list(*results_list, 50, 120, 700, 400);
-    
+    update_results(*results_list, dummy_data, search_box.text); // Populate initial results
+
     // Fade in animation
     fade_anim: Animation;
     start_animation(*fade_anim, 0.0, 1.0, 0.4);
@@ -71,32 +72,47 @@ main :: () {
             
             if event.type == SDL_KEYDOWN {
                 sym := event.key.keysym.sym;
-                
+                handled := false;
+
                 if sym == SDLK_ESCAPE {
                     quit = true;
+                    handled = true;
                 }
                 else if sym == SDLK_DOWN || (sym == SDLK_n && (event.key.keysym.mod & KMOD_CTRL)) {
                     move_selection(*results_list, 1);
+                    handled = true;
                 }
                 else if sym == SDLK_UP || (sym == SDLK_p && (event.key.keysym.mod & KMOD_CTRL)) {
                     move_selection(*results_list, -1);
+                    handled = true;
                 }
                 else if sym == SDLK_RETURN {
                     if results_list.items.count > 0 {
                         print("Selected: %\n", results_list.items[results_list.selected_index].text);
                         // quit = true; // Or hide window
                     }
+                    handled = true;
                 }
                 else if sym == SDLK_t && (event.key.keysym.mod & KMOD_CTRL) {
                     // Toggle Theme
                     is_dark := current_theme == *THEME_DARK;
                     set_theme(!is_dark);
+                    handled = true;
                 }
-                
-                // Pass to Search Box
-                handle_text_input(*search_box, event);
-                // Update results on keypress (naive)
-                update_results(*results_list, dummy_data, search_box.text);
+                else if sym == SDLK_TAB {
+                    // Tab completion: fill search box with selected item
+                    if results_list.items.count > 0 {
+                        search_box.text = results_list.items[results_list.selected_index].text;
+                        update_results(*results_list, dummy_data, search_box.text);
+                    }
+                    handled = true;
+                }
+
+                // Only pass to search box if not a navigation/action key
+                if !handled {
+                    handle_text_input(*search_box, event);
+                    update_results(*results_list, dummy_data, search_box.text);
+                }
             }
             else if event.type == SDL_TEXTINPUT {
                  handle_text_input(*search_box, event);
