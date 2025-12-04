@@ -1,1 +1,4 @@
 bin/
+claude_runs/
+run_tests
+.build/
