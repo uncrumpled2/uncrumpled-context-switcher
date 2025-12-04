@@ -1,0 +1,3 @@
+[submodule "modules/jason"]
+	path = modules/jason
+	url = https://github.com/rluba/jason.git
