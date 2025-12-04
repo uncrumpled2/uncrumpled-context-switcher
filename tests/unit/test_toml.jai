@@ -4,7 +4,7 @@
 
 #import "Basic";
 #import "Math";
-#import,dir "../../modules/jai-toml";
+#import,dir "../../modules/jai-toml-c";
 
 // Registration function for test framework
 register_toml_tests :: (register: (name: string, proc: () -> bool, category: string)) {
