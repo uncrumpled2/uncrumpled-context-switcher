@@ -26,6 +26,7 @@
 #load "unit/test_toml.jai";
 #load "unit/test_config_parser.jai";
 #load "unit/test_config_validator.jai";
+#load "unit/test_event_dispatcher.jai";
 
 // Test registry - each test module registers itself here
 Test_Entry :: struct {
@@ -448,6 +449,7 @@ main :: () {
     register_toml_tests(register_test);
     register_config_parser_tests(register_test);
     register_config_validator_tests(register_test);
+    register_event_dispatcher_tests(register_test);
 
     print("Registered % tests\n", test_registry.count);
 
