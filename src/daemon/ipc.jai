@@ -514,6 +514,215 @@ close_connection_locked :: (server: *IPC_Server, conn: *IPC_Connection) {
 
 } // #if OS == .LINUX || OS == .MACOS
 
+//
+// ============================================================================
+// IPC CLIENT IMPLEMENTATION
+// ============================================================================
+//
+
+// IPC Client for connecting to a server
+IPC_Client :: struct {
+    socket_path: string;
+    fd: s32;
+    state: Connection_State;
+    initialized: bool;
+
+    // Buffers for read/write operations
+    read_buffer: [IPC_BUFFER_SIZE] u8;
+    read_buffer_len: s64;
+    write_buffer: [IPC_BUFFER_SIZE] u8;
+    write_buffer_len: s64;
+    write_buffer_offset: s64;
+
+    last_activity: Apollo_Time;
+
+    // Statistics
+    bytes_received: u64;
+    bytes_sent: u64;
+}
+
+// Initialize IPC client
+init_ipc_client :: (client: *IPC_Client, socket_path: string) -> bool {
+    if client.initialized {
+        return false;  // Already initialized
+    }
+
+    client.socket_path = copy_string(socket_path);
+    client.fd = -1;
+    client.state = .DISCONNECTED;
+    client.initialized = true;
+    client.read_buffer_len = 0;
+    client.write_buffer_len = 0;
+    client.write_buffer_offset = 0;
+    client.bytes_received = 0;
+    client.bytes_sent = 0;
+
+    return true;
+}
+
+// Destroy IPC client
+destroy_ipc_client :: (client: *IPC_Client) {
+    if !client.initialized return;
+
+    disconnect_client(client);
+    free(client.socket_path);
+    client.initialized = false;
+}
+
+// Connect to server
+connect_client :: (client: *IPC_Client) -> bool {
+    if !client.initialized return false;
+    if client.state == .CONNECTED return true;  // Already connected
+
+    #if OS == .LINUX || OS == .MACOS {
+        return connect_unix_client(client);
+    } else {
+        // Windows named pipes - TODO
+        return false;
+    }
+}
+
+// Disconnect from server
+disconnect_client :: (client: *IPC_Client) {
+    if !client.initialized return;
+    if client.state == .DISCONNECTED return;
+
+    #if OS == .LINUX || OS == .MACOS {
+        if client.fd >= 0 {
+            close(client.fd);
+            client.fd = -1;
+        }
+    }
+
+    client.state = .DISCONNECTED;
+    client.read_buffer_len = 0;
+    client.write_buffer_len = 0;
+    client.write_buffer_offset = 0;
+}
+
+// Send data to server
+client_send :: (client: *IPC_Client, data: [] u8) -> s64 {
+    if client.state != .CONNECTED return -1;
+    if data.count == 0 return 0;
+
+    #if OS == .LINUX || OS == .MACOS {
+        result := write(client.fd, data.data, cast(u64) data.count);
+        if result > 0 {
+            client.bytes_sent += cast(u64) result;
+            client.last_activity = current_time_consensus();
+        }
+        return result;
+    } else {
+        return -1;
+    }
+}
+
+// Receive data from server
+// Returns bytes read, 0 on EOF (server closed), -1 on error
+client_receive :: (client: *IPC_Client, buffer: [] u8) -> s64 {
+    if client.state != .CONNECTED return -1;
+    if buffer.count == 0 return 0;
+
+    #if OS == .LINUX || OS == .MACOS {
+        result := read(client.fd, buffer.data, cast(u64) buffer.count);
+        if result > 0 {
+            client.bytes_received += cast(u64) result;
+            client.last_activity = current_time_consensus();
+        } else if result == 0 {
+            // Server closed connection
+            client.state = .DISCONNECTED;
+        }
+        return result;
+    } else {
+        return -1;
+    }
+}
+
+// Check if client has data available to read (non-blocking)
+// Returns: 1 if data available, 0 if no data, -1 on error
+client_poll :: (client: *IPC_Client, timeout_ms: s32) -> s32 {
+    if client.state != .CONNECTED return -1;
+
+    #if OS == .LINUX || OS == .MACOS {
+        pfd: pollfd;
+        pfd.fd = client.fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+
+        result := ipc_poll(*pfd, 1, timeout_ms);
+        if result > 0 {
+            if pfd.revents & POLLIN {
+                return 1;  // Data available
+            }
+            if pfd.revents & (POLLHUP | POLLERR) {
+                client.state = .ERROR;
+                return -1;  // Error or hangup
+            }
+        }
+        return result;
+    } else {
+        return -1;
+    }
+}
+
+// Get client state
+client_is_connected :: (client: *IPC_Client) -> bool {
+    return client.initialized && client.state == .CONNECTED;
+}
+
+// Get client stats
+IPC_Client_Stats :: struct {
+    bytes_received: u64;
+    bytes_sent: u64;
+}
+
+get_client_stats :: (client: *IPC_Client) -> IPC_Client_Stats {
+    stats: IPC_Client_Stats;
+    stats.bytes_received = client.bytes_received;
+    stats.bytes_sent = client.bytes_sent;
+    return stats;
+}
+
+#if OS == .LINUX || OS == .MACOS {
+
+// Import connect from libc
+ipc_connect :: (sockfd: s32, addr: *void, addrlen: u32) -> s32 #foreign libc "connect";
+
+// Connect to Unix domain socket server
+connect_unix_client :: (client: *IPC_Client) -> bool {
+    // Create socket
+    client.fd = ipc_socket(IPC_AF_UNIX, IPC_SOCK_STREAM, 0);
+    if client.fd < 0 {
+        client.state = .ERROR;
+        return false;
+    }
+
+    // Prepare address
+    addr: IPC_sockaddr_un;
+    addr.sun_family = IPC_AF_UNIX;
+
+    // Copy path to sun_path
+    path_bytes := cast([] u8) client.socket_path;
+    for i: 0..ipc_min(path_bytes.count, 107) - 1 {
+        addr.sun_path[i] = path_bytes[i];
+    }
+    addr.sun_path[ipc_min(path_bytes.count, 107)] = 0;
+
+    // Connect
+    if ipc_connect(client.fd, *addr, size_of(IPC_sockaddr_un)) < 0 {
+        close(client.fd);
+        client.fd = -1;
+        client.state = .ERROR;
+        return false;
+    }
+
+    client.state = .CONNECTED;
+    client.last_activity = current_time_consensus();
+    return true;
+}
+
+} // #if OS == .LINUX || OS == .MACOS
+
 // Helper: Convert Jai string to C string (local version)
 ipc_to_c_string :: (s: string) -> *u8 {
     if s.count == 0 return null;
