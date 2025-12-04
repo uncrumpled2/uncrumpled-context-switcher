@@ -7,7 +7,7 @@
 // - Subscription management (subscribe, unsubscribe)
 // - Handshake & version negotiation (handshake)
 // - Preview operations (preview.*)
-// - Log queries (logs.*) - TODO
+// - Log queries (logs.*)
 
 // Dependencies - these must be loaded/imported before loading this module:
 // - Basic, String, Hash_Table, Thread
@@ -20,3 +20,4 @@
 #load "subscription.jai";
 #load "handshake.jai";
 #load "preview.jai";
+#load "logs.jai";
