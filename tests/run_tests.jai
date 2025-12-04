@@ -20,6 +20,7 @@
 #load "unit/test_context_api.jai";
 #load "unit/test_service_api.jai";
 #load "unit/test_subscription_api.jai";
+#load "unit/test_handshake_api.jai";
 
 // Test registry - each test module registers itself here
 Test_Entry :: struct {
@@ -436,6 +437,7 @@ main :: () {
     register_context_api_tests(register_test);
     register_service_api_tests(register_test);
     register_subscription_api_tests(register_test);
+    register_handshake_api_tests(register_test);
 
     print("Registered % tests\n", test_registry.count);
 

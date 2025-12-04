@@ -5,6 +5,7 @@
 // - Context operations (context.*)
 // - Service registration (service.*)
 // - Subscription management (subscribe, unsubscribe)
+// - Handshake & version negotiation (handshake)
 // - Preview operations (preview.*) - TODO
 // - Log queries (logs.*) - TODO
 
@@ -17,3 +18,4 @@
 #load "context.jai";
 #load "service.jai";
 #load "subscription.jai";
+#load "handshake.jai";
