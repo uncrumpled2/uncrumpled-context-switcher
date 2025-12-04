@@ -388,3 +388,186 @@ register_platform_tests :: () {
 }
 
 } // end #if OS == .MACOS
+
+#if OS == .WINDOWS {
+
+test_get_env_helper :: () -> bool {
+    state := init_test_state("test_get_env_helper", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        // USERPROFILE should always be set on Windows
+        userprofile := get_env("USERPROFILE");
+        assert_true(userprofile.count > 0, "USERPROFILE should be set");
+        assert_true(contains(userprofile, "Users"), "USERPROFILE should contain Users");
+
+        // Non-existent var should return empty
+        nonexistent := get_env("UNCRUMPLED_TEST_NONEXISTENT_VAR_12345");
+        assert_string_equal(nonexistent, "", "non-existent var should return empty");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_appdata_dir :: () -> bool {
+    state := init_test_state("test_appdata_dir", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        appdata := get_appdata_dir();
+        defer free(appdata);
+
+        assert_true(appdata.count > 0, "APPDATA should not be empty");
+        assert_true(contains(appdata, "AppData"), "should contain AppData");
+        assert_true(contains(appdata, "Roaming"), "should contain Roaming");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_local_appdata_dir :: () -> bool {
+    state := init_test_state("test_local_appdata_dir", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        local_appdata := get_local_appdata_dir();
+        defer free(local_appdata);
+
+        assert_true(local_appdata.count > 0, "LOCALAPPDATA should not be empty");
+        assert_true(contains(local_appdata, "AppData"), "should contain AppData");
+        assert_true(contains(local_appdata, "Local"), "should contain Local");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_temp_dir :: () -> bool {
+    state := init_test_state("test_temp_dir", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        temp := get_temp_dir();
+        defer free(temp);
+
+        assert_true(temp.count > 0, "TEMP should not be empty");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_uncrumpled_config_dir :: () -> bool {
+    state := init_test_state("test_uncrumpled_config_dir", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        config_dir := get_uncrumpled_config_dir();
+        // Note: config_dir is from tprint so we don't free it
+
+        assert_true(config_dir.count > 0, "config dir should not be empty");
+        assert_true(ends_with(config_dir, "\\uncrumpled"), "should end with \\uncrumpled");
+        assert_true(contains(config_dir, "AppData"), "should contain AppData");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_uncrumpled_pipe_path :: () -> bool {
+    state := init_test_state("test_uncrumpled_pipe_path", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        pipe_path := get_uncrumpled_pipe_path();
+        defer free(pipe_path);
+
+        assert_true(pipe_path.count > 0, "pipe path should not be empty");
+        assert_true(begins_with(pipe_path, "\\\\.\\pipe\\"), "should start with named pipe prefix");
+        assert_true(contains(pipe_path, "uncrumpled"), "should contain uncrumpled");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_uncrumpled_socket_path_alias :: () -> bool {
+    state := init_test_state("test_uncrumpled_socket_path_alias", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        // On Windows, socket_path should return the named pipe path
+        socket_path := get_uncrumpled_socket_path();
+        defer free(socket_path);
+
+        assert_true(socket_path.count > 0, "socket path should not be empty");
+        assert_true(begins_with(socket_path, "\\\\.\\pipe\\"), "should be a named pipe path");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_windows_service_name :: () -> bool {
+    state := init_test_state("test_windows_service_name", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        service_name := get_windows_service_name();
+        defer free(service_name);
+
+        assert_string_equal(service_name, "UncrumpledDaemon", "service name should match");
+    }
+
+    return all_tests_passed(state);
+}
+
+test_service_state_to_string :: () -> bool {
+    state := init_test_state("test_service_state_to_string", verbose = false);
+    defer cleanup_test_state(state);
+
+    ctx := context;
+    ctx.test_state = state;
+
+    push_context ctx {
+        assert_string_equal(service_state_to_string(.NOT_INSTALLED), "not_installed", "NOT_INSTALLED string");
+        assert_string_equal(service_state_to_string(.STOPPED), "stopped", "STOPPED string");
+        assert_string_equal(service_state_to_string(.RUNNING), "running", "RUNNING string");
+        assert_string_equal(service_state_to_string(.UNKNOWN), "unknown", "UNKNOWN string");
+    }
+
+    return all_tests_passed(state);
+}
+
+register_platform_tests :: () {
+    register_test("platform_get_env_helper", test_get_env_helper);
+    register_test("platform_appdata_dir", test_appdata_dir);
+    register_test("platform_local_appdata_dir", test_local_appdata_dir);
+    register_test("platform_temp_dir", test_temp_dir);
+    register_test("platform_uncrumpled_config_dir", test_uncrumpled_config_dir);
+    register_test("platform_uncrumpled_pipe_path", test_uncrumpled_pipe_path);
+    register_test("platform_uncrumpled_socket_path_alias", test_uncrumpled_socket_path_alias);
+    register_test("platform_windows_service_name", test_windows_service_name);
+    register_test("platform_service_state_to_string", test_service_state_to_string);
+}
+
+} // end #if OS == .WINDOWS

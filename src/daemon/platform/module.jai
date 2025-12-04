@@ -12,5 +12,5 @@
 }
 
 #if OS == .WINDOWS {
-    // TODO: #load "windows.jai";
+    #load "windows.jai";
 }

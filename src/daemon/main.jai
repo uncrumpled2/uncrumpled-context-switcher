@@ -106,6 +106,11 @@ init_default_config :: () -> Daemon_Config {
         config.config_path = get_uncrumpled_config_path();
         config.socket_path = get_uncrumpled_socket_path();
         config.pid_file = get_uncrumpled_pid_path();
+    } else #if OS == .WINDOWS {
+        // Windows AppData paths
+        config.config_path = get_uncrumpled_config_path();
+        config.socket_path = get_uncrumpled_socket_path();  // Returns named pipe path
+        config.pid_file = get_uncrumpled_pid_path();
     } else {
         config.config_path = DEFAULT_CONFIG_PATH;
         config.socket_path = DEFAULT_SOCKET_PATH;
@@ -185,23 +190,26 @@ application state, allowing services to discover, register, query, and
 subscribe to context changes.
 
 Options:
-  -d, --daemon         Run as a background daemon
+  -d, --daemon         Run as a background daemon (Unix only)
   -f, --foreground     Stay in foreground (don't daemonize even if --daemon)
   -h, --help           Show this help message
   -v, --version        Show version information
   -V, --verbose        Enable verbose logging
 
   --config FILE        Path to configuration file
-                       Linux:  $XDG_CONFIG_HOME/uncrumpled/config.toml
-                       macOS:  ~/Library/Application Support/uncrumpled/config.toml
+                       Linux:   $XDG_CONFIG_HOME/uncrumpled/config.toml
+                       macOS:   ~/Library/Application Support/uncrumpled/config.toml
+                       Windows: %APPDATA%\uncrumpled\config.toml
 
-  --socket-path PATH   Path to Unix domain socket
-                       Linux:  $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.sock
-                       macOS:  $TMPDIR/uncrumpled.sock
+  --socket-path PATH   Path to IPC endpoint
+                       Linux:   $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.sock (Unix socket)
+                       macOS:   $TMPDIR/uncrumpled.sock (Unix socket)
+                       Windows: \\.\pipe\uncrumpled-context (Named pipe)
 
   --pid-file PATH      Path to PID file
-                       Linux:  $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.pid
-                       macOS:  $TMPDIR/uncrumpled.pid
+                       Linux:   $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.pid
+                       macOS:   $TMPDIR/uncrumpled.pid
+                       Windows: %LOCALAPPDATA%\uncrumpled\uncrumpled.pid
 
   --systemd-socket     Use socket passed by systemd socket activation
                        (Linux only, for use with systemd socket units)
@@ -229,6 +237,16 @@ macOS (launchd):
 
   To view logs:
     tail -f ~/Library/Logs/uncrumpled/daemon.log
+
+Windows:
+  To install as a startup application:
+    deploy\windows\install.bat --startup
+
+  To install as a Windows service (requires Admin):
+    deploy\windows\install.bat --service
+
+  Configuration: %APPDATA%\uncrumpled\config.toml
+  Logs: %LOCALAPPDATA%\uncrumpled\logs\
 
 For more information, visit: https://github.com/uncrumpled/context-switcher
 END
@@ -520,6 +538,24 @@ run_daemon :: (config: *Daemon_Config) {
         }
     }
 
+    #if OS == .WINDOWS {
+        // Ensure directories exist on Windows
+        config_dir := get_uncrumpled_config_dir();
+        if !ensure_directory(config_dir) {
+            log_warning("Could not create config directory: %", config_dir);
+        }
+
+        data_dir := get_uncrumpled_data_dir();
+        if !ensure_directory(data_dir) {
+            log_warning("Could not create data directory: %", data_dir);
+        }
+
+        logs_dir := get_uncrumpled_logs_dir();
+        if !ensure_directory(logs_dir) {
+            log_warning("Could not create logs directory: %", logs_dir);
+        }
+    }
+
     // Setup signal handlers
     setup_signal_handlers();
 
@@ -625,9 +661,14 @@ sleep_milliseconds :: (ms: int) {
         spec.tv_sec = ms / 1000;
         spec.tv_nsec = (ms % 1000) * 1_000_000;
         nanosleep(*spec, null);
-    } else {
-        // Windows would use Sleep()
+    } else #if OS == .WINDOWS {
+        windows_Sleep(cast(u32) ms);
     }
+}
+
+#if OS == .WINDOWS {
+    windows_kernel32 :: #system_library "kernel32";
+    windows_Sleep :: (dwMilliseconds: u32) #foreign windows_kernel32 "Sleep";
 }
 
 // Cleanup resources

@@ -181,8 +181,9 @@ start_server :: (server: *IPC_Server) -> bool {
 
     #if OS == .LINUX || OS == .MACOS {
         return start_unix_server(server);
+    } else #if OS == .WINDOWS {
+        return start_windows_server(server);
     } else {
-        // Windows named pipes - TODO
         return false;
     }
 }
@@ -209,6 +210,8 @@ poll_events :: (server: *IPC_Server, timeout_ms: s32) -> s32 {
 
     #if OS == .LINUX || OS == .MACOS {
         return poll_unix_events(server, timeout_ms);
+    } else #if OS == .WINDOWS {
+        return poll_windows_events(server, timeout_ms);
     } else {
         return -1;
     }
@@ -224,6 +227,8 @@ accept_connections :: (server: *IPC_Server) -> s32 {
 
     #if OS == .LINUX || OS == .MACOS {
         return accept_unix_connections(server);
+    } else #if OS == .WINDOWS {
+        return accept_windows_connections(server);
     } else {
         return 0;
     }
@@ -241,6 +246,8 @@ read_connection :: (server: *IPC_Server, conn: *IPC_Connection, buffer: [] u8) -
             conn.last_activity = current_time_consensus();
         }
         return result;
+    } else #if OS == .WINDOWS {
+        return read_windows_connection(server, conn, buffer);
     } else {
         return -1;
     }
@@ -258,6 +265,8 @@ write_connection :: (server: *IPC_Server, conn: *IPC_Connection, data: [] u8) ->
             conn.last_activity = current_time_consensus();
         }
         return result;
+    } else #if OS == .WINDOWS {
+        return write_windows_connection(server, conn, data);
     } else {
         return -1;
     }
@@ -295,23 +304,29 @@ flush_write_buffer :: (server: *IPC_Server, conn: *IPC_Connection) -> s64 {
 
     data_ptr := conn.write_buffer.data + conn.write_buffer_offset;
 
-    #if OS == .LINUX || OS == .MACOS {
-        result := write(conn.fd, data_ptr, cast(u64) remaining);
-        if result > 0 {
-            conn.write_buffer_offset += result;
-            server.total_bytes_sent += cast(u64) result;
-            conn.last_activity = current_time_consensus();
+    result: s64 = -1;
 
-            // If fully written, reset buffer
-            if conn.write_buffer_offset >= conn.write_buffer_len {
-                conn.write_buffer_len = 0;
-                conn.write_buffer_offset = 0;
-            }
-        }
-        return result;
-    } else {
-        return -1;
+    #if OS == .LINUX || OS == .MACOS {
+        result = write(conn.fd, data_ptr, cast(u64) remaining);
+    } else #if OS == .WINDOWS {
+        data_slice: [] u8;
+        data_slice.data = data_ptr;
+        data_slice.count = remaining;
+        result = write_windows_connection(server, conn, data_slice);
     }
+
+    if result > 0 {
+        conn.write_buffer_offset += result;
+        server.total_bytes_sent += cast(u64) result;
+        conn.last_activity = current_time_consensus();
+
+        // If fully written, reset buffer
+        if conn.write_buffer_offset >= conn.write_buffer_len {
+            conn.write_buffer_len = 0;
+            conn.write_buffer_offset = 0;
+        }
+    }
+    return result;
 }
 
 // Close a connection
@@ -613,8 +628,9 @@ connect_client :: (client: *IPC_Client) -> bool {
 
     #if OS == .LINUX || OS == .MACOS {
         return connect_unix_client(client);
+    } else #if OS == .WINDOWS {
+        return connect_windows_client(client);
     } else {
-        // Windows named pipes - TODO
         return false;
     }
 }
@@ -629,6 +645,9 @@ disconnect_client :: (client: *IPC_Client) {
             close(client.fd);
             client.fd = -1;
         }
+    } else #if OS == .WINDOWS {
+        disconnect_windows_client(client);
+        return;  // Windows function handles state reset
     }
 
     client.state = .DISCONNECTED;
@@ -649,6 +668,8 @@ client_send :: (client: *IPC_Client, data: [] u8) -> s64 {
             client.last_activity = current_time_consensus();
         }
         return result;
+    } else #if OS == .WINDOWS {
+        return client_send_windows(client, data);
     } else {
         return -1;
     }
@@ -670,6 +691,8 @@ client_receive :: (client: *IPC_Client, buffer: [] u8) -> s64 {
             client.state = .DISCONNECTED;
         }
         return result;
+    } else #if OS == .WINDOWS {
+        return client_receive_windows(client, buffer);
     } else {
         return -1;
     }
@@ -697,6 +720,8 @@ client_poll :: (client: *IPC_Client, timeout_ms: s32) -> s32 {
             }
         }
         return result;
+    } else #if OS == .WINDOWS {
+        return client_poll_windows(client, timeout_ms);
     } else {
         return -1;
     }
@@ -774,3 +799,425 @@ ipc_to_c_string :: (s: string) -> *u8 {
 ipc_min :: inline (a: $T, b: T) -> T {
     return ifx a < b then a else b;
 }
+
+//
+// ============================================================================
+// WINDOWS NAMED PIPE IMPLEMENTATION
+// ============================================================================
+//
+
+#if OS == .WINDOWS {
+
+// Windows type aliases (scoped to this block)
+HANDLE :: *void;
+DWORD :: u32;
+BOOL :: s32;
+LPCSTR :: *u8;
+LPVOID :: *void;
+
+// Windows constants
+INVALID_HANDLE_VALUE :: cast(HANDLE) -1;
+PIPE_ACCESS_DUPLEX :: 0x00000003;
+PIPE_TYPE_BYTE :: 0x00000000;
+PIPE_READMODE_BYTE :: 0x00000000;
+PIPE_WAIT :: 0x00000000;
+PIPE_NOWAIT :: 0x00000001;
+PIPE_UNLIMITED_INSTANCES :: 255;
+GENERIC_READ :: 0x80000000;
+GENERIC_WRITE :: 0x40000000;
+OPEN_EXISTING :: 3;
+FILE_FLAG_OVERLAPPED :: 0x40000000;
+ERROR_PIPE_BUSY :: 231;
+ERROR_PIPE_CONNECTED :: 535;
+ERROR_NO_DATA :: 232;
+ERROR_BROKEN_PIPE :: 109;
+NMPWAIT_USE_DEFAULT_WAIT :: 0;
+NMPWAIT_WAIT_FOREVER :: 0xFFFFFFFF;
+
+// Windows API functions
+kernel32 :: #system_library "kernel32";
+
+CreateNamedPipeA :: (
+    lpName: LPCSTR,
+    dwOpenMode: DWORD,
+    dwPipeMode: DWORD,
+    nMaxInstances: DWORD,
+    nOutBufferSize: DWORD,
+    nInBufferSize: DWORD,
+    nDefaultTimeOut: DWORD,
+    lpSecurityAttributes: LPVOID
+) -> HANDLE #foreign kernel32;
+
+ConnectNamedPipe :: (hNamedPipe: HANDLE, lpOverlapped: LPVOID) -> BOOL #foreign kernel32;
+DisconnectNamedPipe :: (hNamedPipe: HANDLE) -> BOOL #foreign kernel32;
+CreateFileA :: (
+    lpFileName: LPCSTR,
+    dwDesiredAccess: DWORD,
+    dwShareMode: DWORD,
+    lpSecurityAttributes: LPVOID,
+    dwCreationDisposition: DWORD,
+    dwFlagsAndAttributes: DWORD,
+    hTemplateFile: HANDLE
+) -> HANDLE #foreign kernel32;
+
+ReadFile :: (
+    hFile: HANDLE,
+    lpBuffer: LPVOID,
+    nNumberOfBytesToRead: DWORD,
+    lpNumberOfBytesRead: *DWORD,
+    lpOverlapped: LPVOID
+) -> BOOL #foreign kernel32;
+
+WriteFile :: (
+    hFile: HANDLE,
+    lpBuffer: LPVOID,
+    nNumberOfBytesToWrite: DWORD,
+    lpNumberOfBytesWritten: *DWORD,
+    lpOverlapped: LPVOID
+) -> BOOL #foreign kernel32;
+
+CloseHandle :: (hObject: HANDLE) -> BOOL #foreign kernel32;
+GetLastError :: () -> DWORD #foreign kernel32;
+WaitNamedPipeA :: (lpNamedPipeName: LPCSTR, nTimeOut: DWORD) -> BOOL #foreign kernel32;
+PeekNamedPipe :: (
+    hNamedPipe: HANDLE,
+    lpBuffer: LPVOID,
+    nBufferSize: DWORD,
+    lpBytesRead: *DWORD,
+    lpTotalBytesAvail: *DWORD,
+    lpBytesLeftThisMessage: *DWORD
+) -> BOOL #foreign kernel32;
+
+SetNamedPipeHandleState :: (
+    hNamedPipe: HANDLE,
+    lpMode: *DWORD,
+    lpMaxCollectionCount: *DWORD,
+    lpCollectDataTimeout: *DWORD
+) -> BOOL #foreign kernel32;
+
+// Start Windows named pipe server
+start_windows_server :: (server: *IPC_Server) -> bool {
+    // Create the named pipe
+    // The pipe name should be in the form \\.\pipe\pipename
+    pipe_name := ipc_to_c_string(server.socket_path);
+    defer free(pipe_name);
+
+    server.server_fd = cast(s32) cast(u64) CreateNamedPipeA(
+        pipe_name,
+        PIPE_ACCESS_DUPLEX,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        PIPE_UNLIMITED_INSTANCES,
+        cast(DWORD) IPC_BUFFER_SIZE,
+        cast(DWORD) IPC_BUFFER_SIZE,
+        0,  // Default timeout
+        null
+    );
+
+    if cast(HANDLE) cast(u64) server.server_fd == INVALID_HANDLE_VALUE {
+        server.server_fd = -1;
+        return false;
+    }
+
+    server.running = true;
+    return true;
+}
+
+// Poll for events on Windows (check for pending connections and data)
+poll_windows_events :: (server: *IPC_Server, timeout_ms: s32) -> s32 {
+    events_found: s32 = 0;
+
+    // Check each connected client for available data
+    for *conn: server.connections {
+        if conn.state == .CONNECTED {
+            bytes_available: DWORD = 0;
+            if PeekNamedPipe(cast(HANDLE) cast(u64) conn.fd, null, 0, null, *bytes_available, null) {
+                if bytes_available > 0 {
+                    events_found += 1;
+                }
+            } else {
+                // Pipe error - client may have disconnected
+                err := GetLastError();
+                if err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA {
+                    conn.state = .ERROR;
+                    events_found += 1;  // Signal that this connection needs attention
+                }
+            }
+        }
+    }
+
+    // Check if server pipe is ready for a new connection
+    // This is a simplified check - in production, use overlapped I/O
+    if server.connection_count < MAX_CLIENTS {
+        // Attempt a non-blocking connection check
+        // For now, we signal that connections might be pending
+        events_found += 1;
+    }
+
+    return events_found;
+}
+
+// Accept connections on Windows
+accept_windows_connections :: (server: *IPC_Server) -> s32 {
+    accepted: s32 = 0;
+
+    // Find a free connection slot
+    free_slot: *IPC_Connection = null;
+    for *conn: server.connections {
+        if conn.state == .DISCONNECTED {
+            free_slot = conn;
+            break;
+        }
+    }
+
+    if free_slot == null {
+        return 0;  // No free slots
+    }
+
+    // For named pipes, ConnectNamedPipe waits for a client
+    // We need to create a new pipe instance for the server to continue accepting
+    pipe_name := ipc_to_c_string(server.socket_path);
+    defer free(pipe_name);
+
+    // The current server_fd becomes the client connection
+    // We create a new server pipe for future connections
+    if server.server_fd >= 0 {
+        // Try to connect a client to the existing pipe
+        result := ConnectNamedPipe(cast(HANDLE) cast(u64) server.server_fd, null);
+        err := GetLastError();
+
+        if result || err == ERROR_PIPE_CONNECTED {
+            // Client connected
+            free_slot.id = server.next_connection_id;
+            server.next_connection_id += 1;
+            free_slot.fd = server.server_fd;
+            free_slot.state = .CONNECTED;
+            free_slot.read_buffer_len = 0;
+            free_slot.write_buffer_len = 0;
+            free_slot.write_buffer_offset = 0;
+            free_slot.last_activity = current_time_consensus();
+            free_slot.user_data = null;
+
+            server.connection_count += 1;
+            server.total_connections += 1;
+            accepted += 1;
+
+            // Create a new pipe for the next client
+            server.server_fd = cast(s32) cast(u64) CreateNamedPipeA(
+                pipe_name,
+                PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_UNLIMITED_INSTANCES,
+                cast(DWORD) IPC_BUFFER_SIZE,
+                cast(DWORD) IPC_BUFFER_SIZE,
+                0,
+                null
+            );
+
+            if cast(HANDLE) cast(u64) server.server_fd == INVALID_HANDLE_VALUE {
+                server.server_fd = -1;
+            }
+        }
+    }
+
+    return accepted;
+}
+
+// Close connection on Windows
+close_windows_connection :: (server: *IPC_Server, conn: *IPC_Connection) {
+    if conn.state == .DISCONNECTED return;
+
+    if conn.fd >= 0 {
+        // Disconnect the named pipe
+        DisconnectNamedPipe(cast(HANDLE) cast(u64) conn.fd);
+        CloseHandle(cast(HANDLE) cast(u64) conn.fd);
+        conn.fd = -1;
+    }
+
+    conn.id = 0;
+    conn.state = .DISCONNECTED;
+    conn.read_buffer_len = 0;
+    conn.write_buffer_len = 0;
+    conn.write_buffer_offset = 0;
+
+    if server.connection_count > 0 {
+        server.connection_count -= 1;
+    }
+}
+
+// Read from Windows named pipe connection
+read_windows_connection :: (server: *IPC_Server, conn: *IPC_Connection, buffer: [] u8) -> s64 {
+    if conn.state != .CONNECTED return -1;
+
+    bytes_read: DWORD = 0;
+    if ReadFile(
+        cast(HANDLE) cast(u64) conn.fd,
+        buffer.data,
+        cast(DWORD) buffer.count,
+        *bytes_read,
+        null
+    ) {
+        if bytes_read > 0 {
+            server.total_bytes_received += cast(u64) bytes_read;
+            conn.last_activity = current_time_consensus();
+        }
+        return cast(s64) bytes_read;
+    }
+
+    err := GetLastError();
+    if err == ERROR_BROKEN_PIPE {
+        return 0;  // EOF - client disconnected
+    }
+
+    return -1;  // Error
+}
+
+// Write to Windows named pipe connection
+write_windows_connection :: (server: *IPC_Server, conn: *IPC_Connection, data: [] u8) -> s64 {
+    if conn.state != .CONNECTED return -1;
+
+    bytes_written: DWORD = 0;
+    if WriteFile(
+        cast(HANDLE) cast(u64) conn.fd,
+        data.data,
+        cast(DWORD) data.count,
+        *bytes_written,
+        null
+    ) {
+        if bytes_written > 0 {
+            server.total_bytes_sent += cast(u64) bytes_written;
+            conn.last_activity = current_time_consensus();
+        }
+        return cast(s64) bytes_written;
+    }
+
+    return -1;  // Error
+}
+
+// Connect Windows named pipe client
+connect_windows_client :: (client: *IPC_Client) -> bool {
+    pipe_name := ipc_to_c_string(client.socket_path);
+    defer free(pipe_name);
+
+    // Wait for the pipe to be available (with timeout)
+    if !WaitNamedPipeA(pipe_name, 5000) {  // 5 second timeout
+        err := GetLastError();
+        if err == ERROR_PIPE_BUSY {
+            client.state = .ERROR;
+            return false;
+        }
+        // Pipe doesn't exist or error
+        client.state = .ERROR;
+        return false;
+    }
+
+    // Open the pipe
+    handle := CreateFileA(
+        pipe_name,
+        GENERIC_READ | GENERIC_WRITE,
+        0,  // No sharing
+        null,
+        OPEN_EXISTING,
+        0,
+        null
+    );
+
+    if handle == INVALID_HANDLE_VALUE {
+        client.state = .ERROR;
+        return false;
+    }
+
+    client.fd = cast(s32) cast(u64) handle;
+    client.state = .CONNECTED;
+    client.last_activity = current_time_consensus();
+
+    return true;
+}
+
+// Disconnect Windows named pipe client
+disconnect_windows_client :: (client: *IPC_Client) {
+    if client.fd >= 0 {
+        CloseHandle(cast(HANDLE) cast(u64) client.fd);
+        client.fd = -1;
+    }
+
+    client.state = .DISCONNECTED;
+    client.read_buffer_len = 0;
+    client.write_buffer_len = 0;
+    client.write_buffer_offset = 0;
+}
+
+// Send data via Windows named pipe client
+client_send_windows :: (client: *IPC_Client, data: [] u8) -> s64 {
+    if client.state != .CONNECTED return -1;
+    if data.count == 0 return 0;
+
+    bytes_written: DWORD = 0;
+    if WriteFile(
+        cast(HANDLE) cast(u64) client.fd,
+        data.data,
+        cast(DWORD) data.count,
+        *bytes_written,
+        null
+    ) {
+        if bytes_written > 0 {
+            client.bytes_sent += cast(u64) bytes_written;
+            client.last_activity = current_time_consensus();
+        }
+        return cast(s64) bytes_written;
+    }
+
+    return -1;
+}
+
+// Receive data via Windows named pipe client
+client_receive_windows :: (client: *IPC_Client, buffer: [] u8) -> s64 {
+    if client.state != .CONNECTED return -1;
+    if buffer.count == 0 return 0;
+
+    bytes_read: DWORD = 0;
+    if ReadFile(
+        cast(HANDLE) cast(u64) client.fd,
+        buffer.data,
+        cast(DWORD) buffer.count,
+        *bytes_read,
+        null
+    ) {
+        if bytes_read > 0 {
+            client.bytes_received += cast(u64) bytes_read;
+            client.last_activity = current_time_consensus();
+        } else if bytes_read == 0 {
+            client.state = .DISCONNECTED;
+        }
+        return cast(s64) bytes_read;
+    }
+
+    err := GetLastError();
+    if err == ERROR_BROKEN_PIPE {
+        client.state = .DISCONNECTED;
+        return 0;
+    }
+
+    return -1;
+}
+
+// Poll for data on Windows named pipe client
+client_poll_windows :: (client: *IPC_Client, timeout_ms: s32) -> s32 {
+    if client.state != .CONNECTED return -1;
+
+    bytes_available: DWORD = 0;
+    if PeekNamedPipe(cast(HANDLE) cast(u64) client.fd, null, 0, null, *bytes_available, null) {
+        if bytes_available > 0 {
+            return 1;  // Data available
+        }
+        return 0;  // No data
+    }
+
+    err := GetLastError();
+    if err == ERROR_BROKEN_PIPE {
+        client.state = .DISCONNECTED;
+    }
+
+    return -1;  // Error
+}
+
+} // #if OS == .WINDOWS
