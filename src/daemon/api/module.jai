@@ -4,7 +4,7 @@
 // It includes handlers for:
 // - Context operations (context.*)
 // - Service registration (service.*)
-// - Subscription management (subscribe, unsubscribe) - TODO
+// - Subscription management (subscribe, unsubscribe)
 // - Preview operations (preview.*) - TODO
 // - Log queries (logs.*) - TODO
 
@@ -16,3 +16,4 @@
 
 #load "context.jai";
 #load "service.jai";
+#load "subscription.jai";
