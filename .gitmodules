@@ -1,3 +1,9 @@
 [submodule "modules/jason"]
 	path = modules/jason
 	url = https://github.com/rluba/jason.git
+[submodule "modules/jai-toml/toml-c"]
+	path = modules/jai-toml/toml-c
+	url = https://github.com/arp242/toml-c.git
+[submodule "modules/jai-toml-c"]
+	path = modules/jai-toml-c
+	url = git@github.com:uncrumpled2/jai-toml-c.git
