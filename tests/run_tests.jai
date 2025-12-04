@@ -16,6 +16,7 @@
 #load "unit/test_daemon_args.jai";
 #load "unit/test_context_store.jai";
 #load "unit/test_ipc.jai";
+#load "unit/test_jsonrpc.jai";
 
 // Test registry - each test module registers itself here
 Test_Entry :: struct {
@@ -428,6 +429,7 @@ main :: () {
     register_daemon_args_tests();
     register_context_store_tests();
     register_ipc_tests();
+    register_jsonrpc_tests(register_test);
 
     print("Registered % tests\n", test_registry.count);
 
