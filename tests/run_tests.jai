@@ -30,6 +30,9 @@
 #load "unit/test_heartbeat.jai";
 #load "unit/test_sdk.jai";
 
+// Integration / E2E tests
+#load "integration/test_e2e.jai";
+
 // Test registry - each test module registers itself here
 Test_Entry :: struct {
     name: string;
@@ -454,6 +457,9 @@ main :: () {
     register_event_dispatcher_tests(register_test);
     register_heartbeat_tests(register_test);
     register_sdk_tests(register_test);
+
+    // Register e2e/integration tests
+    register_e2e_tests(register_test);
 
     print("Registered % tests\n", test_registry.count);
 
