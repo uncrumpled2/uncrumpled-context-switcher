@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Service identifier -->
+    <key>Label</key>
+    <string>com.uncrumpled.daemon</string>
+
+    <!-- Program to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__INSTALL_DIR__/uncrumpled-daemon</string>
+        <string>--daemon</string>
+    </array>
+
+    <!-- Start automatically at login -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Keep the service running -->
+    <key>KeepAlive</key>
+    <dict>
+        <!-- Restart on crash -->
+        <key>SuccessfulExit</key>
+        <false/>
+        <!-- But not if disabled -->
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <!-- Restart after crash with backoff -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>__HOME_DIR__</string>
+
+    <!-- Standard output/error logging -->
+    <key>StandardOutPath</key>
+    <string>__HOME_DIR__/Library/Logs/uncrumpled/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME_DIR__/Library/Logs/uncrumpled/daemon.error.log</string>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME_DIR__</string>
+        <key>TMPDIR</key>
+        <string>__TMPDIR__</string>
+    </dict>
+
+    <!-- Process type for CPU priority -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- Nice value (lower = higher priority) -->
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <!-- Low priority I/O -->
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>

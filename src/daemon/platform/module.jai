@@ -1,15 +1,14 @@
 // Platform Module
 //
 // Platform-specific functionality for Linux, macOS, and Windows.
-// Currently implements Linux specifics.
+// Each platform provides path helpers, service integration, and directory management.
 
 #if OS == .LINUX {
     #load "linux.jai";
 }
 
-// Placeholder for future platform implementations
 #if OS == .MACOS {
-    // TODO: #load "macos.jai";
+    #load "macos.jai";
 }
 
 #if OS == .WINDOWS {

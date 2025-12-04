@@ -29,6 +29,7 @@
 #load "unit/test_event_dispatcher.jai";
 #load "unit/test_heartbeat.jai";
 #load "unit/test_sdk.jai";
+#load "unit/test_platform.jai";
 
 // Integration / E2E tests
 #load "integration/test_e2e.jai";
@@ -457,6 +458,7 @@ main :: () {
     register_event_dispatcher_tests(register_test);
     register_heartbeat_tests(register_test);
     register_sdk_tests(register_test);
+    register_platform_tests();
 
     // Register e2e/integration tests
     register_e2e_tests(register_test);

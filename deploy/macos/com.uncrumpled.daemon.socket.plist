@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Service identifier -->
+    <key>Label</key>
+    <string>com.uncrumpled.daemon.socket</string>
+
+    <!-- Program to run when socket connection arrives -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>__INSTALL_DIR__/uncrumpled-daemon</string>
+        <string>--daemon</string>
+        <string>--launchd-socket</string>
+    </array>
+
+    <!-- Socket activation - start on first connection -->
+    <key>Sockets</key>
+    <dict>
+        <key>Listeners</key>
+        <dict>
+            <!-- Unix domain socket -->
+            <key>SockPathName</key>
+            <string>__SOCKET_PATH__</string>
+            <key>SockPathMode</key>
+            <integer>384</integer><!-- 0600 -->
+        </dict>
+    </dict>
+
+    <!-- Only start on socket connection, not at login -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Keep running after first activation -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+        <key>Crashed</key>
+        <true/>
+    </dict>
+
+    <!-- Restart after crash with backoff -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <!-- Working directory -->
+    <key>WorkingDirectory</key>
+    <string>__HOME_DIR__</string>
+
+    <!-- Standard output/error logging -->
+    <key>StandardOutPath</key>
+    <string>__HOME_DIR__/Library/Logs/uncrumpled/daemon.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME_DIR__/Library/Logs/uncrumpled/daemon.error.log</string>
+
+    <!-- Environment variables -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME_DIR__</string>
+        <key>TMPDIR</key>
+        <string>__TMPDIR__</string>
+    </dict>
+
+    <!-- Process type for CPU priority -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+    <!-- Nice value -->
+    <key>Nice</key>
+    <integer>10</integer>
+
+    <!-- Low priority I/O -->
+    <key>LowPriorityIO</key>
+    <true/>
+</dict>
+</plist>

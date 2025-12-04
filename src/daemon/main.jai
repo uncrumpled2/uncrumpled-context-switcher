@@ -67,7 +67,8 @@ Daemon_Config :: struct {
     show_help: bool;
     show_version: bool;
     verbose: bool;
-    systemd_socket: bool;  // Use systemd socket activation
+    systemd_socket: bool;  // Use systemd socket activation (Linux)
+    launchd_socket: bool;  // Use launchd socket activation (macOS)
 
     // Parsed state
     has_error: bool;
@@ -91,10 +92,17 @@ init_default_config :: () -> Daemon_Config {
     config.show_version = false;
     config.verbose = false;
     config.systemd_socket = false;
+    config.launchd_socket = false;
     config.has_error = false;
 
-    // Use XDG-compliant paths on Linux
+    // Use platform-specific paths
     #if OS == .LINUX {
+        // XDG-compliant paths
+        config.config_path = get_uncrumpled_config_path();
+        config.socket_path = get_uncrumpled_socket_path();
+        config.pid_file = get_uncrumpled_pid_path();
+    } else #if OS == .MACOS {
+        // macOS Library paths
         config.config_path = get_uncrumpled_config_path();
         config.socket_path = get_uncrumpled_socket_path();
         config.pid_file = get_uncrumpled_pid_path();
@@ -151,6 +159,8 @@ parse_arguments :: (args: [] string) -> Daemon_Config {
             }
         } else if arg == "--systemd-socket" {
             config.systemd_socket = true;
+        } else if arg == "--launchd-socket" {
+            config.launchd_socket = true;
         } else if begins_with(arg, "-") {
             config.has_error = true;
             config.error_message = tprint("Unknown option: %", arg);
@@ -182,16 +192,22 @@ Options:
   -V, --verbose        Enable verbose logging
 
   --config FILE        Path to configuration file
-                       (default: $XDG_CONFIG_HOME/uncrumpled/config.toml)
+                       Linux:  $XDG_CONFIG_HOME/uncrumpled/config.toml
+                       macOS:  ~/Library/Application Support/uncrumpled/config.toml
 
   --socket-path PATH   Path to Unix domain socket
-                       (default: $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.sock)
+                       Linux:  $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.sock
+                       macOS:  $TMPDIR/uncrumpled.sock
 
   --pid-file PATH      Path to PID file
-                       (default: $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.pid)
+                       Linux:  $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.pid
+                       macOS:  $TMPDIR/uncrumpled.pid
 
   --systemd-socket     Use socket passed by systemd socket activation
-                       (for use with systemd socket units)
+                       (Linux only, for use with systemd socket units)
+
+  --launchd-socket     Use socket passed by launchd socket activation
+                       (macOS only, for use with launchd socket plist)
 
 Examples:
   uncrumpled-daemon                    Run in foreground with defaults
@@ -199,13 +215,20 @@ Examples:
   uncrumpled-daemon -d -V              Daemonize with verbose logging
   uncrumpled-daemon --socket-path /var/run/uncrumpled.sock
 
-systemd Integration:
+Linux (systemd):
   To run as a systemd user service:
     systemctl --user enable uncrumpled
     systemctl --user start uncrumpled
 
   To view logs:
     journalctl --user -u uncrumpled -f
+
+macOS (launchd):
+  To run as a launchd user agent:
+    launchctl load ~/Library/LaunchAgents/com.uncrumpled.daemon.plist
+
+  To view logs:
+    tail -f ~/Library/Logs/uncrumpled/daemon.log
 
 For more information, visit: https://github.com/uncrumpled/context-switcher
 END
@@ -423,13 +446,15 @@ run_daemon :: (config: *Daemon_Config) {
     log("Socket path: %", config.socket_path);
     log("Config path: %", config.config_path);
 
-    // Check for systemd socket activation (Linux only)
-    systemd_fd: s32 = -1;
+    // Check for socket activation (platform-specific)
+    service_fd: s32 = -1;
+
     #if OS == .LINUX {
+        // Check for systemd socket activation (Linux only)
         if config.systemd_socket {
-            systemd_fd = get_systemd_socket_fd();
-            if systemd_fd >= 0 {
-                log("Using systemd socket activation (fd=%)", systemd_fd);
+            service_fd = get_systemd_socket_fd();
+            if service_fd >= 0 {
+                log("Using systemd socket activation (fd=%)", service_fd);
                 clear_systemd_listen_vars();
             } else {
                 log_warning("--systemd-socket specified but no socket passed by systemd");
@@ -438,22 +463,59 @@ run_daemon :: (config: *Daemon_Config) {
             // Auto-detect socket activation even without flag
             fd_count := is_systemd_socket_activated();
             if fd_count > 0 {
-                systemd_fd = SD_LISTEN_FDS_START;
-                log("Auto-detected systemd socket activation (fd=%)", systemd_fd);
+                service_fd = SD_LISTEN_FDS_START;
+                log("Auto-detected systemd socket activation (fd=%)", service_fd);
                 clear_systemd_listen_vars();
             }
         }
     }
 
-    // Ensure runtime directory exists for socket (Linux only)
+    #if OS == .MACOS {
+        // Check for launchd socket activation (macOS only)
+        if config.launchd_socket {
+            service_fd = get_launchd_socket_fd();
+            if service_fd >= 0 {
+                log("Using launchd socket activation (fd=%)", service_fd);
+            } else {
+                log_warning("--launchd-socket specified but no socket passed by launchd");
+            }
+        } else {
+            // Auto-detect launchd socket activation
+            if is_launchd_socket_activated() {
+                service_fd = get_launchd_socket_fd();
+                if service_fd >= 0 {
+                    log("Auto-detected launchd socket activation (fd=%)", service_fd);
+                }
+            }
+        }
+    }
+
+    // Ensure runtime directory exists for socket (platform-specific)
     #if OS == .LINUX {
-        if systemd_fd < 0 {  // Only if not using systemd socket
-            // Extract parent directory from socket path
+        if service_fd < 0 {  // Only if not using systemd socket
             socket_dir := get_socket_directory(config.socket_path);
             if socket_dir.count > 0 {
                 if !ensure_directory(socket_dir) {
                     log_warning("Could not create socket directory: %", socket_dir);
                 }
+            }
+        }
+    }
+
+    #if OS == .MACOS {
+        if service_fd < 0 {  // Only if not using launchd socket
+            // Ensure log directory exists
+            logs_dir := get_uncrumpled_logs_dir();
+            defer free(logs_dir);
+            if !ensure_directory(logs_dir) {
+                log_warning("Could not create logs directory: %", logs_dir);
+            }
+
+            // Ensure config directory exists
+            config_dir := get_uncrumpled_config_dir();
+            defer free(config_dir);
+            if !ensure_directory(config_dir) {
+                log_warning("Could not create config directory: %", config_dir);
             }
         }
     }
@@ -488,7 +550,7 @@ run_daemon :: (config: *Daemon_Config) {
     }
 
     // Initialize the daemon server
-    if !init_daemon_server(*daemon_server, config.socket_path, *user_config, systemd_fd) {
+    if !init_daemon_server(*daemon_server, config.socket_path, *user_config, service_fd) {
         log_error("Failed to initialize daemon server");
         if config_loaded free_user_config(*user_config);
         return;
