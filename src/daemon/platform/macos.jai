@@ -10,11 +10,11 @@
 #import "POSIX";
 
 // macOS uses different standard paths than Linux
-// - Config: ~/Library/Application Support/uncrumpled/config.toml
-// - Data: ~/Library/Application Support/uncrumpled/
-// - Cache: ~/Library/Caches/uncrumpled/
-// - Logs: ~/Library/Logs/uncrumpled/
-// - Runtime: /tmp or ~/Library/Caches/uncrumpled/
+// - Config: ~/Library/Application Support/uncrumpled-context-switcher/config.toml
+// - Data: ~/Library/Application Support/uncrumpled-context-switcher/
+// - Cache: ~/Library/Caches/uncrumpled-context-switcher/
+// - Logs: ~/Library/Logs/uncrumpled-context-switcher/
+// - Runtime: /tmp or ~/Library/Caches/uncrumpled-context-switcher/
 
 // Get the Application Support directory path
 get_application_support_dir :: () -> string {
@@ -65,7 +65,7 @@ get_preferences_dir :: () -> string {
 get_uncrumpled_config_dir :: () -> string {
     app_support := get_application_support_dir();
     // Note: app_support is from tprint so we don't free it
-    return tprint("%/uncrumpled", app_support);
+    return tprint("%/uncrumpled-context-switcher", app_support);
 }
 
 // Get the uncrumpled config file path
@@ -89,14 +89,14 @@ get_uncrumpled_state_dir :: () -> string {
 get_uncrumpled_cache_dir :: () -> string {
     caches := get_caches_dir();
     // Note: caches is from tprint so we don't free it
-    return tprint("%/uncrumpled", caches);
+    return tprint("%/uncrumpled-context-switcher", caches);
 }
 
 // Get the uncrumpled logs directory path
 get_uncrumpled_logs_dir :: () -> string {
     logs := get_logs_dir();
     // Note: logs is from tprint so we don't free it
-    return tprint("%/uncrumpled", logs);
+    return tprint("%/uncrumpled-context-switcher", logs);
 }
 
 // Get the preferred socket path
@@ -105,21 +105,21 @@ get_uncrumpled_socket_path :: () -> string {
     // Check for custom TMPDIR (common on macOS)
     tmpdir := get_env("TMPDIR");
     if tmpdir.count > 0 {
-        return tprint("%/uncrumpled.sock", tmpdir);
+        return tprint("%/uncrumpled-context-switcher.sock", tmpdir);
     }
 
     // Fallback to /tmp
-    return copy_string("/tmp/uncrumpled.sock");
+    return copy_string("/tmp/uncrumpled-context-switcher.sock");
 }
 
 // Get the PID file path
 get_uncrumpled_pid_path :: () -> string {
     tmpdir := get_env("TMPDIR");
     if tmpdir.count > 0 {
-        return tprint("%/uncrumpled.pid", tmpdir);
+        return tprint("%/uncrumpled-context-switcher.pid", tmpdir);
     }
 
-    return copy_string("/tmp/uncrumpled.pid");
+    return copy_string("/tmp/uncrumpled-context-switcher.pid");
 }
 
 // Helper to get environment variable
@@ -170,14 +170,14 @@ is_running_under_launchd :: () -> bool {
 
 // Get the launchd service label for this daemon
 get_launchd_service_label :: () -> string {
-    return copy_string("com.uncrumpled.daemon");
+    return copy_string("com.uncrumpled-context-switcher.daemon");
 }
 
 // Get the launchd plist path for the current user
 get_launchd_plist_path :: () -> string {
     agents_dir := get_launch_agents_dir();
     defer free(agents_dir);
-    return tprint("%/com.uncrumpled.daemon.plist", agents_dir);
+    return tprint("%/com.uncrumpled-context-switcher.daemon.plist", agents_dir);
 }
 
 // Ensure a directory exists with proper permissions

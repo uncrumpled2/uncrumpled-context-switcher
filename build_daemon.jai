@@ -8,14 +8,14 @@ build :: () {
     // Disable output for the build script workspace itself
     set_build_options_dc(.{do_output = false});
 
-    w := compiler_create_workspace("Uncrumpled Daemon");
+    w := compiler_create_workspace("Uncrumpled Context Switcher Daemon");
     if !w {
         print("Workspace creation failed.\n");
         return;
     }
 
     options := get_build_options(w);
-    options.output_executable_name = "uncrumpled-daemon";
+    options.output_executable_name = "uncrumpled-context-switcher-daemon";
     options.output_path = "bin";
     options.intermediate_path = "bin/int";
 

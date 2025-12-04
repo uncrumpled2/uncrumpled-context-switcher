@@ -11,16 +11,16 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$AppName = "UncrumpledDaemon"
+$AppName = "UncrumpledContextSwitcherDaemon"
 $DisplayName = "Uncrumpled Context Switcher"
 $Description = "A context management daemon that acts as a central hub for application state"
-$ExeName = "uncrumpled-daemon.exe"
+$ExeName = "uncrumpled-context-switcher-daemon.exe"
 
 # Paths
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$InstallDir = "$env:LOCALAPPDATA\uncrumpled"
-$ConfigDir = "$env:APPDATA\uncrumpled"
-$LogDir = "$env:LOCALAPPDATA\uncrumpled\logs"
+$InstallDir = "$env:LOCALAPPDATA\uncrumpled-context-switcher"
+$ConfigDir = "$env:APPDATA\uncrumpled-context-switcher"
+$LogDir = "$env:LOCALAPPDATA\uncrumpled-context-switcher\logs"
 
 function Show-Help {
     Write-Host @"
@@ -90,7 +90,7 @@ description = "Personal context"
 
 [daemon]
 # Named pipe path (Windows uses named pipes instead of Unix sockets)
-pipe_path = "\\.\pipe\uncrumpled-context"
+pipe_path = "\\.\pipe\uncrumpled-context-switcher"
 heartbeat_interval_seconds = 30
 subscriber_timeout_seconds = 90
 max_log_entries = 1000

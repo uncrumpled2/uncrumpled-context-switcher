@@ -27,7 +27,7 @@ create_app_window :: () -> *Window_State {
     start_x := (display_mode.w - 800) / 2;
     start_y := (display_mode.h - 600) / 3; // Slightly higher than center looks better
 
-    window := SDL_CreateWindow("Uncrumpled Switcher",
+    window := SDL_CreateWindow("Uncrumpled Context Switcher",
                              start_x, start_y,
                              800, 600,
                              flags);

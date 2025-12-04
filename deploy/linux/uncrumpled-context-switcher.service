@@ -1,0 +1,52 @@
+# Uncrumpled Context Switcher - systemd User Service
+#
+# This is a systemd user service file for the Uncrumpled Context Switcher daemon.
+# It should be installed to ~/.config/systemd/user/uncrumpled-context-switcher.service
+#
+# Installation:
+#   mkdir -p ~/.config/systemd/user
+#   cp uncrumpled-context-switcher.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable uncrumpled-context-switcher
+#   systemctl --user start uncrumpled-context-switcher
+#
+# Useful commands:
+#   systemctl --user status uncrumpled-context-switcher
+#   systemctl --user restart uncrumpled-context-switcher
+#   journalctl --user -u uncrumpled-context-switcher -f   # View logs
+
+[Unit]
+Description=Uncrumpled Context Switcher Daemon
+Documentation=https://github.com/uncrumpled/uncrumpled-context-switcher
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/uncrumpled-context-switcher-daemon --foreground
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+
+# Socket and state file paths
+Environment=XDG_RUNTIME_DIR=%t
+RuntimeDirectory=uncrumpled-context-switcher
+RuntimeDirectoryMode=0700
+
+# Resource limits
+LimitNOFILE=1024
+MemoryMax=128M
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+# Allow access to user config directory
+ReadWritePaths=%h/.config/uncrumpled-context-switcher
+
+[Install]
+WantedBy=default.target

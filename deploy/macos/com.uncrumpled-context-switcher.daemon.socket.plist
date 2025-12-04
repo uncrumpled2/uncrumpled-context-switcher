@@ -4,12 +4,12 @@
 <dict>
     <!-- Service identifier -->
     <key>Label</key>
-    <string>com.uncrumpled.daemon.socket</string>
+    <string>com.uncrumpled-context-switcher.daemon.socket</string>
 
     <!-- Program to run when socket connection arrives -->
     <key>ProgramArguments</key>
     <array>
-        <string>__INSTALL_DIR__/uncrumpled-daemon</string>
+        <string>__INSTALL_DIR__/uncrumpled-context-switcher-daemon</string>
         <string>--daemon</string>
         <string>--launchd-socket</string>
     </array>
@@ -50,9 +50,9 @@
 
     <!-- Standard output/error logging -->
     <key>StandardOutPath</key>
-    <string>__HOME_DIR__/Library/Logs/uncrumpled/daemon.log</string>
+    <string>__HOME_DIR__/Library/Logs/uncrumpled-context-switcher/daemon.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME_DIR__/Library/Logs/uncrumpled/daemon.error.log</string>
+    <string>__HOME_DIR__/Library/Logs/uncrumpled-context-switcher/daemon.error.log</string>
 
     <!-- Environment variables -->
     <key>EnvironmentVariables</key>

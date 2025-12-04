@@ -57,21 +57,21 @@ done
 
 # Set installation paths
 BIN_DIR="${HOME}/.local/bin"
-APP_SUPPORT_DIR="${HOME}/Library/Application Support/uncrumpled"
+APP_SUPPORT_DIR="${HOME}/Library/Application Support/uncrumpled-context-switcher"
 LAUNCH_AGENTS_DIR="${HOME}/Library/LaunchAgents"
-LOGS_DIR="${HOME}/Library/Logs/uncrumpled"
-CACHE_DIR="${HOME}/Library/Caches/uncrumpled"
+LOGS_DIR="${HOME}/Library/Logs/uncrumpled-context-switcher"
+CACHE_DIR="${HOME}/Library/Caches/uncrumpled-context-switcher"
 
 # Socket path (use TMPDIR if available, otherwise /tmp)
 if [[ -n "$TMPDIR" ]]; then
-    SOCKET_PATH="${TMPDIR}uncrumpled.sock"
+    SOCKET_PATH="${TMPDIR}uncrumpled-context-switcher.sock"
 else
-    SOCKET_PATH="/tmp/uncrumpled.sock"
+    SOCKET_PATH="/tmp/uncrumpled-context-switcher.sock"
 fi
 
 # Service label
-SERVICE_LABEL="com.uncrumpled.daemon"
-SOCKET_SERVICE_LABEL="com.uncrumpled.daemon.socket"
+SERVICE_LABEL="com.uncrumpled-context-switcher.daemon"
+SOCKET_SERVICE_LABEL="com.uncrumpled-context-switcher.daemon.socket"
 
 # Source directory (where this script is located)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,8 +97,8 @@ if [[ "$INSTALL_MODE" == "uninstall" ]]; then
 
     # Remove binaries
     echo "Removing binaries..."
-    rm -f "${BIN_DIR}/uncrumpled-daemon"
-    rm -f "${BIN_DIR}/uncrumpled"
+    rm -f "${BIN_DIR}/uncrumpled-context-switcher-daemon"
+    rm -f "${BIN_DIR}/uncrumpled-context-switcher-cli"
 
     # Remove launchd plist files
     echo "Removing launchd plist files..."
@@ -120,8 +120,8 @@ if [[ "$INSTALL_MODE" == "uninstall" ]]; then
 fi
 
 # Check for built binaries
-DAEMON_BIN="${PROJECT_ROOT}/build/uncrumpled-daemon"
-CLI_BIN="${PROJECT_ROOT}/build/uncrumpled"
+DAEMON_BIN="${PROJECT_ROOT}/build/uncrumpled-context-switcher-daemon"
+CLI_BIN="${PROJECT_ROOT}/build/uncrumpled-context-switcher-cli"
 
 if [[ ! -f "$DAEMON_BIN" ]]; then
     echo "Error: Daemon binary not found at ${DAEMON_BIN}"
@@ -152,9 +152,9 @@ mkdir -p "$CACHE_DIR"
 
 # Install binaries
 echo "Installing binaries..."
-install -m 755 "$DAEMON_BIN" "${BIN_DIR}/uncrumpled-daemon"
+install -m 755 "$DAEMON_BIN" "${BIN_DIR}/uncrumpled-context-switcher-daemon"
 if [[ -f "$CLI_BIN" ]]; then
-    install -m 755 "$CLI_BIN" "${BIN_DIR}/uncrumpled"
+    install -m 755 "$CLI_BIN" "${BIN_DIR}/uncrumpled-context-switcher-cli"
 fi
 
 # Install default configuration (if not exists)
@@ -207,8 +207,8 @@ type = "bool"
 default = false
 
 [daemon]
-# Socket path (defaults to $TMPDIR/uncrumpled.sock)
-# socket_path = "/tmp/uncrumpled.sock"
+# Socket path (defaults to $TMPDIR/uncrumpled-context-switcher.sock)
+# socket_path = "/tmp/uncrumpled-context-switcher.sock"
 
 # Heartbeat interval in seconds
 heartbeat_interval_seconds = 30
@@ -233,7 +233,7 @@ TMPDIR_VALUE="${TMPDIR:-/tmp}"
 TMPDIR_VALUE="${TMPDIR_VALUE%/}"
 
 if [[ "$USE_SOCKET_ACTIVATION" == "true" ]]; then
-    PLIST_SRC="${SCRIPT_DIR}/com.uncrumpled.daemon.socket.plist"
+    PLIST_SRC="${SCRIPT_DIR}/com.uncrumpled-context-switcher.daemon.socket.plist"
     PLIST_DST="${LAUNCH_AGENTS_DIR}/${SOCKET_SERVICE_LABEL}.plist"
     ACTIVE_LABEL="$SOCKET_SERVICE_LABEL"
 
@@ -244,7 +244,7 @@ if [[ "$USE_SOCKET_ACTIVATION" == "true" ]]; then
         -e "s|__SOCKET_PATH__|${SOCKET_PATH}|g" \
         "$PLIST_SRC" > "$PLIST_DST"
 else
-    PLIST_SRC="${SCRIPT_DIR}/com.uncrumpled.daemon.plist"
+    PLIST_SRC="${SCRIPT_DIR}/com.uncrumpled-context-switcher.daemon.plist"
     PLIST_DST="${LAUNCH_AGENTS_DIR}/${SERVICE_LABEL}.plist"
     ACTIVE_LABEL="$SERVICE_LABEL"
 
@@ -284,7 +284,7 @@ if [[ "$USE_SOCKET_ACTIVATION" == "true" ]]; then
     echo ""
 fi
 echo "3. Check if the service is running:"
-echo "   launchctl list | grep uncrumpled"
+echo "   launchctl list | grep uncrumpled-context-switcher"
 echo ""
 echo "4. View logs:"
 echo "   tail -f \"${LOGS_DIR}/daemon.log\""

@@ -57,15 +57,15 @@ done
 # Set installation paths based on mode
 if [[ "$INSTALL_MODE" == "system" ]]; then
     BIN_DIR="/usr/local/bin"
-    CONFIG_DIR="/etc/uncrumpled"
+    CONFIG_DIR="/etc/uncrumpled-context-switcher"
     SERVICE_DIR="/etc/systemd/system"
-    DATA_DIR="/var/lib/uncrumpled"
+    DATA_DIR="/var/lib/uncrumpled-context-switcher"
     SOCKET_UNIT_ENABLED=true
 else
     BIN_DIR="${HOME}/.local/bin"
-    CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/uncrumpled"
+    CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/uncrumpled-context-switcher"
     SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
-    DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/uncrumpled"
+    DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/uncrumpled-context-switcher"
     SOCKET_UNIT_ENABLED=false
 fi
 
@@ -84,26 +84,26 @@ if [[ "$INSTALL_MODE" == "uninstall" ]]; then
 
     # Stop and disable services
     if [[ -d "$SERVICE_DIR" ]]; then
-        if systemctl --user is-active uncrumpled.service &>/dev/null 2>&1; then
+        if systemctl --user is-active uncrumpled-context-switcher.service &>/dev/null 2>&1; then
             echo "Stopping service..."
-            systemctl --user stop uncrumpled.service 2>/dev/null || true
+            systemctl --user stop uncrumpled-context-switcher.service 2>/dev/null || true
         fi
-        if systemctl --user is-enabled uncrumpled.service &>/dev/null 2>&1; then
+        if systemctl --user is-enabled uncrumpled-context-switcher.service &>/dev/null 2>&1; then
             echo "Disabling service..."
-            systemctl --user disable uncrumpled.service 2>/dev/null || true
+            systemctl --user disable uncrumpled-context-switcher.service 2>/dev/null || true
         fi
     fi
 
     # Remove binaries
     echo "Removing binaries..."
-    rm -f "${BIN_DIR}/uncrumpled-daemon"
-    rm -f "${BIN_DIR}/uncrumpled"
+    rm -f "${BIN_DIR}/uncrumpled-context-switcher-daemon"
+    rm -f "${BIN_DIR}/uncrumpled-context-switcher-cli"
 
     # Remove service files
     echo "Removing service files..."
-    rm -f "${SERVICE_DIR}/uncrumpled.service"
-    rm -f "${SERVICE_DIR}/uncrumpled.socket"
-    rm -f "${SERVICE_DIR}/uncrumpled-socket.service"
+    rm -f "${SERVICE_DIR}/uncrumpled-context-switcher.service"
+    rm -f "${SERVICE_DIR}/uncrumpled-context-switcher.socket"
+    rm -f "${SERVICE_DIR}/uncrumpled-context-switcher-socket.service"
 
     # Reload systemd
     if command -v systemctl &>/dev/null; then
@@ -119,8 +119,8 @@ if [[ "$INSTALL_MODE" == "uninstall" ]]; then
 fi
 
 # Check for built binaries
-DAEMON_BIN="${PROJECT_ROOT}/build/uncrumpled-daemon"
-CLI_BIN="${PROJECT_ROOT}/build/uncrumpled"
+DAEMON_BIN="${PROJECT_ROOT}/build/uncrumpled-context-switcher-daemon"
+CLI_BIN="${PROJECT_ROOT}/build/uncrumpled-context-switcher-cli"
 
 if [[ ! -f "$DAEMON_BIN" ]]; then
     echo "Error: Daemon binary not found at ${DAEMON_BIN}"
@@ -146,9 +146,9 @@ mkdir -p "$DATA_DIR"
 
 # Install binaries
 echo "Installing binaries..."
-install -m 755 "$DAEMON_BIN" "${BIN_DIR}/uncrumpled-daemon"
+install -m 755 "$DAEMON_BIN" "${BIN_DIR}/uncrumpled-context-switcher-daemon"
 if [[ -f "$CLI_BIN" ]]; then
-    install -m 755 "$CLI_BIN" "${BIN_DIR}/uncrumpled"
+    install -m 755 "$CLI_BIN" "${BIN_DIR}/uncrumpled-context-switcher-cli"
 fi
 
 # Install default configuration (if not exists)
@@ -201,8 +201,8 @@ type = "bool"
 default = false
 
 [daemon]
-# Socket path (defaults to XDG_RUNTIME_DIR/uncrumpled/uncrumpled.sock)
-# socket_path = "/tmp/uncrumpled.sock"
+# Socket path (defaults to XDG_RUNTIME_DIR/uncrumpled-context-switcher/uncrumpled-context-switcher.sock)
+# socket_path = "/tmp/uncrumpled-context-switcher.sock"
 
 # Heartbeat interval in seconds
 heartbeat_interval_seconds = 30
@@ -220,13 +220,13 @@ fi
 
 # Install systemd service files
 echo "Installing systemd service files..."
-install -m 644 "${SCRIPT_DIR}/uncrumpled.service" "${SERVICE_DIR}/uncrumpled.service"
-install -m 644 "${SCRIPT_DIR}/uncrumpled.socket" "${SERVICE_DIR}/uncrumpled.socket"
-install -m 644 "${SCRIPT_DIR}/uncrumpled-socket.service" "${SERVICE_DIR}/uncrumpled-socket.service"
+install -m 644 "${SCRIPT_DIR}/uncrumpled-context-switcher.service" "${SERVICE_DIR}/uncrumpled-context-switcher.service"
+install -m 644 "${SCRIPT_DIR}/uncrumpled-context-switcher.socket" "${SERVICE_DIR}/uncrumpled-context-switcher.socket"
+install -m 644 "${SCRIPT_DIR}/uncrumpled-context-switcher-socket.service" "${SERVICE_DIR}/uncrumpled-context-switcher-socket.service"
 
 # Update service file with correct binary path
-sed -i "s|%h/.local/bin/uncrumpled-daemon|${BIN_DIR}/uncrumpled-daemon|g" "${SERVICE_DIR}/uncrumpled.service"
-sed -i "s|%h/.local/bin/uncrumpled-daemon|${BIN_DIR}/uncrumpled-daemon|g" "${SERVICE_DIR}/uncrumpled-socket.service"
+sed -i "s|%h/.local/bin/uncrumpled-context-switcher-daemon|${BIN_DIR}/uncrumpled-context-switcher-daemon|g" "${SERVICE_DIR}/uncrumpled-context-switcher.service"
+sed -i "s|%h/.local/bin/uncrumpled-context-switcher-daemon|${BIN_DIR}/uncrumpled-context-switcher-daemon|g" "${SERVICE_DIR}/uncrumpled-context-switcher-socket.service"
 
 # Reload systemd
 echo "Reloading systemd..."
@@ -249,21 +249,21 @@ if [[ "$INSTALL_MODE" == "user" ]]; then
     echo "   export PATH=\"\$PATH:${BIN_DIR}\""
     echo ""
     echo "2. Enable and start the service:"
-    echo "   systemctl --user enable uncrumpled"
-    echo "   systemctl --user start uncrumpled"
+    echo "   systemctl --user enable uncrumpled-context-switcher"
+    echo "   systemctl --user start uncrumpled-context-switcher"
     echo ""
     echo "3. Check the status:"
-    echo "   systemctl --user status uncrumpled"
+    echo "   systemctl --user status uncrumpled-context-switcher"
     echo ""
     echo "4. View logs:"
-    echo "   journalctl --user -u uncrumpled -f"
+    echo "   journalctl --user -u uncrumpled-context-switcher -f"
 else
     echo "1. Enable and start the service:"
-    echo "   sudo systemctl enable uncrumpled"
-    echo "   sudo systemctl start uncrumpled"
+    echo "   sudo systemctl enable uncrumpled-context-switcher"
+    echo "   sudo systemctl start uncrumpled-context-switcher"
     echo ""
     echo "2. Check the status:"
-    echo "   sudo systemctl status uncrumpled"
+    echo "   sudo systemctl status uncrumpled-context-switcher"
 fi
 
 echo ""

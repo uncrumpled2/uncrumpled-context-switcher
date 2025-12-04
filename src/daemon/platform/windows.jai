@@ -10,13 +10,13 @@
 #import "String";
 
 // Windows uses different standard paths than Unix:
-// - Config: %APPDATA%\uncrumpled\config.toml
-// - Data: %LOCALAPPDATA%\uncrumpled\
-// - Cache: %LOCALAPPDATA%\uncrumpled\cache\
-// - Logs: %LOCALAPPDATA%\uncrumpled\logs\
+// - Config: %APPDATA%\uncrumpled-context-switcher\config.toml
+// - Data: %LOCALAPPDATA%\uncrumpled-context-switcher\
+// - Cache: %LOCALAPPDATA%\uncrumpled-context-switcher\cache\
+// - Logs: %LOCALAPPDATA%\uncrumpled-context-switcher\logs\
 
 // Standard Windows named pipe path
-WINDOWS_PIPE_NAME :: "\\\\.\\pipe\\uncrumpled-context";
+WINDOWS_PIPE_NAME :: "\\\\.\\pipe\\uncrumpled-context-switcher";
 
 // Get the APPDATA directory path (%APPDATA%)
 // Typically C:\Users\<username>\AppData\Roaming
@@ -82,7 +82,7 @@ get_temp_dir :: () -> string {
 get_uncrumpled_config_dir :: () -> string {
     appdata := get_appdata_dir();
     defer free(appdata);
-    return tprint("%\\uncrumpled", appdata);
+    return tprint("%\\uncrumpled-context-switcher", appdata);
 }
 
 // Get the uncrumpled config file path
@@ -96,7 +96,7 @@ get_uncrumpled_config_path :: () -> string {
 get_uncrumpled_data_dir :: () -> string {
     local_appdata := get_local_appdata_dir();
     defer free(local_appdata);
-    return tprint("%\\uncrumpled", local_appdata);
+    return tprint("%\\uncrumpled-context-switcher", local_appdata);
 }
 
 // Get the uncrumpled state directory path
@@ -133,7 +133,7 @@ get_uncrumpled_socket_path :: () -> string {
 get_uncrumpled_pid_path :: () -> string {
     data_dir := get_uncrumpled_data_dir();
     // Note: data_dir is from tprint so we don't free it
-    return tprint("%\\uncrumpled.pid", data_dir);
+    return tprint("%\\uncrumpled-context-switcher.pid", data_dir);
 }
 
 // Helper to get environment variable
@@ -183,7 +183,7 @@ Windows_Service_State :: enum {
 
 // Get the service name for registration
 get_windows_service_name :: () -> string {
-    return copy_string("UncrumpledDaemon");
+    return copy_string("UncrumpledContextSwitcherDaemon");
 }
 
 // Get the service display name
@@ -350,7 +350,7 @@ acquire_single_instance :: () -> Windows_Single_Instance {
     result.mutex_handle = null;
 
     // Create a named mutex
-    mutex_name := "Global\\UncrumpledContextSwitcherMutex";
+    mutex_name := "Global\\UncrumpledContextSwitcherDaemonMutex";
     result.mutex_handle = CreateMutexA(null, 1, mutex_name.data);  // 1 = bInitialOwner
 
     if result.mutex_handle != null {

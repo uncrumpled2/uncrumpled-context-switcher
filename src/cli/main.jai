@@ -4,7 +4,7 @@
 // This client sends JSON-RPC requests to the daemon and displays the responses.
 //
 // Usage:
-//   uncrumpled-cli [OPTIONS] COMMAND [ARGS]
+//   uncrumpled-context-switcher-cli [OPTIONS] COMMAND [ARGS]
 //
 // Commands:
 //   context get          Get current context
@@ -19,7 +19,7 @@
 //   ping                 Check if daemon is running
 //
 // Options:
-//   --socket PATH        Socket path (default: /tmp/uncrumpled.sock)
+//   --socket PATH        Socket path (default: /tmp/uncrumpled-context-switcher.sock)
 //   --json               Output raw JSON responses
 //   --help, -h           Show help message
 //   --version, -v        Show version information
@@ -59,9 +59,9 @@ CLI_VERSION :: "0.1.0";
 
 // Default socket path
 #if OS == .LINUX || OS == .MACOS {
-    DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled.sock";
+    DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled-context-switcher.sock";
 } else {
-    DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context";
+    DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context-switcher";
 }
 
 // Buffer sizes
@@ -134,7 +134,7 @@ print_cli_help :: () {
     help_text :: #string END
 Uncrumpled Context Switcher CLI Client
 
-Usage: uncrumpled-cli [OPTIONS] COMMAND [ARGS]
+Usage: uncrumpled-context-switcher-cli [OPTIONS] COMMAND [ARGS]
 
 Commands:
   context get            Get current context
@@ -155,18 +155,18 @@ Commands:
   subscribe EVENTS       Subscribe to events (for testing)
 
 Options:
-  --socket PATH          Socket path (default: /tmp/uncrumpled.sock)
+  --socket PATH          Socket path (default: /tmp/uncrumpled-context-switcher.sock)
   --json                 Output raw JSON responses
   -h, --help             Show this help message
   -v, --version          Show version information
 
 Examples:
-  uncrumpled-cli context get
-  uncrumpled-cli context add-tag --work
-  uncrumpled-cli context set-param mode debug
-  uncrumpled-cli service list
-  uncrumpled-cli ping
-  uncrumpled-cli --json context get
+  uncrumpled-context-switcher-cli context get
+  uncrumpled-context-switcher-cli context add-tag --work
+  uncrumpled-context-switcher-cli context set-param mode debug
+  uncrumpled-context-switcher-cli service list
+  uncrumpled-context-switcher-cli ping
+  uncrumpled-context-switcher-cli --json context get
 
 END
     print(help_text);
@@ -174,7 +174,7 @@ END
 
 // Print version
 print_cli_version :: () {
-    print("Uncrumpled CLI Client v%\n", CLI_VERSION);
+    print("Uncrumpled Context Switcher CLI Client v%\n", CLI_VERSION);
 }
 
 // ============================================================================
@@ -459,7 +459,7 @@ main :: () {
     // Handle errors
     if config.has_error {
         print("Error: %\n", config.error_message);
-        print("Try 'uncrumpled-cli --help' for more information.\n");
+        print("Try 'uncrumpled-context-switcher-cli --help' for more information.\n");
         exit(1);
     }
 
@@ -478,7 +478,7 @@ main :: () {
     // Require a command
     if config.command.count == 0 {
         print("Error: No command specified\n");
-        print("Try 'uncrumpled-cli --help' for more information.\n");
+        print("Try 'uncrumpled-context-switcher-cli --help' for more information.\n");
         exit(1);
     }
 
@@ -538,7 +538,7 @@ main :: () {
         }
     } else {
         print("Error: Unknown command: %\n", config.command);
-        print("Try 'uncrumpled-cli --help' for available commands.\n");
+        print("Try 'uncrumpled-context-switcher-cli --help' for available commands.\n");
         exit(1);
     }
 

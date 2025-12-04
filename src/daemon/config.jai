@@ -19,14 +19,14 @@ PROTOCOL_VERSION :: "1.0.0";
 
 // Default paths
 #if OS == .LINUX || OS == .MACOS {
-    DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled.sock";
-    DEFAULT_PID_FILE :: "/tmp/uncrumpled.pid";
-    DEFAULT_CONFIG_PATH :: "~/.config/uncrumpled/config.toml";
+    DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled-context-switcher.sock";
+    DEFAULT_PID_FILE :: "/tmp/uncrumpled-context-switcher.pid";
+    DEFAULT_CONFIG_PATH :: "~/.config/uncrumpled-context-switcher/config.toml";
 } else {
     // Windows defaults
-    DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context";
+    DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context-switcher";
     DEFAULT_PID_FILE :: "";  // Windows uses named mutex instead
-    DEFAULT_CONFIG_PATH :: "%APPDATA%\\uncrumpled\\config.toml";
+    DEFAULT_CONFIG_PATH :: "%APPDATA%\\uncrumpled-context-switcher\\config.toml";
 }
 
 // Command-line configuration
@@ -119,7 +119,7 @@ print_help :: () {
     help_text :: #string END
 Uncrumpled Context Switcher Daemon
 
-Usage: uncrumpled-daemon [OPTIONS]
+Usage: uncrumpled-context-switcher-daemon [OPTIONS]
 
 A cross-platform context management daemon that acts as a central hub for
 application state, allowing services to discover, register, query, and
@@ -133,21 +133,21 @@ Options:
   -V, --verbose        Enable verbose logging
 
   --config FILE        Path to configuration file
-                       (default: ~/.config/uncrumpled/config.toml)
+                       (default: ~/.config/uncrumpled-context-switcher/config.toml)
 
   --socket-path PATH   Path to Unix domain socket
-                       (default: /tmp/uncrumpled.sock)
+                       (default: /tmp/uncrumpled-context-switcher.sock)
 
   --pid-file PATH      Path to PID file
-                       (default: /tmp/uncrumpled.pid)
+                       (default: /tmp/uncrumpled-context-switcher.pid)
 
 Examples:
-  uncrumpled-daemon                    Run in foreground with defaults
-  uncrumpled-daemon -d                 Run as a background daemon
-  uncrumpled-daemon -d -V              Daemonize with verbose logging
-  uncrumpled-daemon --socket-path /var/run/uncrumpled.sock
+  uncrumpled-context-switcher-daemon                    Run in foreground with defaults
+  uncrumpled-context-switcher-daemon -d                 Run as a background daemon
+  uncrumpled-context-switcher-daemon -d -V              Daemonize with verbose logging
+  uncrumpled-context-switcher-daemon --socket-path /var/run/uncrumpled-context-switcher.sock
 
-For more information, visit: https://github.com/uncrumpled/context-switcher
+For more information, visit: https://github.com/uncrumpled/uncrumpled-context-switcher
 END
     print(help_text);
 }

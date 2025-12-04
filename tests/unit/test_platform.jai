@@ -100,7 +100,7 @@ test_uncrumpled_config_dir :: () -> bool {
         config_dir := get_uncrumpled_config_dir();
 
         assert_true(config_dir.count > 0, "config dir should not be empty");
-        assert_true(ends_with(config_dir, "/uncrumpled"), "should end with /uncrumpled");
+        assert_true(ends_with(config_dir, "/uncrumpled-context-switcher"), "should end with /uncrumpled-context-switcher");
     }
 
     return all_tests_passed(state);
@@ -286,7 +286,7 @@ test_uncrumpled_config_dir :: () -> bool {
         config_dir := get_uncrumpled_config_dir();
 
         assert_true(config_dir.count > 0, "config dir should not be empty");
-        assert_true(ends_with(config_dir, "/uncrumpled"), "should end with /uncrumpled");
+        assert_true(ends_with(config_dir, "/uncrumpled-context-switcher"), "should end with /uncrumpled-context-switcher");
         assert_true(contains(config_dir, "Application Support"), "should contain Application Support");
     }
 
@@ -321,7 +321,7 @@ test_launchd_service_label :: () -> bool {
         label := get_launchd_service_label();
         defer free(label);
 
-        assert_string_equal(label, "com.uncrumpled.daemon", "label should match");
+        assert_string_equal(label, "com.uncrumpled-context-switcher.daemon", "label should match");
     }
 
     return all_tests_passed(state);
@@ -479,7 +479,7 @@ test_uncrumpled_config_dir :: () -> bool {
         // Note: config_dir is from tprint so we don't free it
 
         assert_true(config_dir.count > 0, "config dir should not be empty");
-        assert_true(ends_with(config_dir, "\\uncrumpled"), "should end with \\uncrumpled");
+        assert_true(ends_with(config_dir, "\\uncrumpled-context-switcher"), "should end with \\uncrumpled-context-switcher");
         assert_true(contains(config_dir, "AppData"), "should contain AppData");
     }
 
@@ -535,7 +535,7 @@ test_windows_service_name :: () -> bool {
         service_name := get_windows_service_name();
         defer free(service_name);
 
-        assert_string_equal(service_name, "UncrumpledDaemon", "service name should match");
+        assert_string_equal(service_name, "UncrumpledContextSwitcherDaemon", "service name should match");
     }
 
     return all_tests_passed(state);

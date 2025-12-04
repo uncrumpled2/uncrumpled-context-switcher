@@ -47,14 +47,14 @@ PROTOCOL_VERSION :: "1.0.0";
 
 // Default paths
 #if OS == .LINUX || OS == .MACOS {
-    DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled.sock";
-    DEFAULT_PID_FILE :: "/tmp/uncrumpled.pid";
-    DEFAULT_CONFIG_PATH :: "~/.config/uncrumpled/config.toml";
+    DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled-context-switcher.sock";
+    DEFAULT_PID_FILE :: "/tmp/uncrumpled-context-switcher.pid";
+    DEFAULT_CONFIG_PATH :: "~/.config/uncrumpled-context-switcher/config.toml";
 } else {
     // Windows defaults
-    DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context";
+    DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context-switcher";
     DEFAULT_PID_FILE :: "";  // Windows uses named mutex instead
-    DEFAULT_CONFIG_PATH :: "%APPDATA%\\uncrumpled\\config.toml";
+    DEFAULT_CONFIG_PATH :: "%APPDATA%\\uncrumpled-context-switcher\\config.toml";
 }
 
 // Command-line configuration
@@ -183,7 +183,7 @@ print_help :: () {
     help_text :: #string END
 Uncrumpled Context Switcher Daemon
 
-Usage: uncrumpled-daemon [OPTIONS]
+Usage: uncrumpled-context-switcher-daemon [OPTIONS]
 
 A cross-platform context management daemon that acts as a central hub for
 application state, allowing services to discover, register, query, and
@@ -197,19 +197,19 @@ Options:
   -V, --verbose        Enable verbose logging
 
   --config FILE        Path to configuration file
-                       Linux:   $XDG_CONFIG_HOME/uncrumpled/config.toml
-                       macOS:   ~/Library/Application Support/uncrumpled/config.toml
-                       Windows: %APPDATA%\uncrumpled\config.toml
+                       Linux:   $XDG_CONFIG_HOME/uncrumpled-context-switcher/config.toml
+                       macOS:   ~/Library/Application Support/uncrumpled-context-switcher/config.toml
+                       Windows: %APPDATA%\uncrumpled-context-switcher\config.toml
 
   --socket-path PATH   Path to IPC endpoint
-                       Linux:   $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.sock (Unix socket)
-                       macOS:   $TMPDIR/uncrumpled.sock (Unix socket)
-                       Windows: \\.\pipe\uncrumpled-context (Named pipe)
+                       Linux:   $XDG_RUNTIME_DIR/uncrumpled-context-switcher/uncrumpled-context-switcher.sock (Unix socket)
+                       macOS:   $TMPDIR/uncrumpled-context-switcher.sock (Unix socket)
+                       Windows: \\.\pipe\uncrumpled-context-switcher (Named pipe)
 
   --pid-file PATH      Path to PID file
-                       Linux:   $XDG_RUNTIME_DIR/uncrumpled/uncrumpled.pid
-                       macOS:   $TMPDIR/uncrumpled.pid
-                       Windows: %LOCALAPPDATA%\uncrumpled\uncrumpled.pid
+                       Linux:   $XDG_RUNTIME_DIR/uncrumpled-context-switcher/uncrumpled-context-switcher.pid
+                       macOS:   $TMPDIR/uncrumpled-context-switcher.pid
+                       Windows: %LOCALAPPDATA%\uncrumpled-context-switcher\uncrumpled-context-switcher.pid
 
   --systemd-socket     Use socket passed by systemd socket activation
                        (Linux only, for use with systemd socket units)
@@ -218,25 +218,25 @@ Options:
                        (macOS only, for use with launchd socket plist)
 
 Examples:
-  uncrumpled-daemon                    Run in foreground with defaults
-  uncrumpled-daemon -d                 Run as a background daemon
-  uncrumpled-daemon -d -V              Daemonize with verbose logging
-  uncrumpled-daemon --socket-path /var/run/uncrumpled.sock
+  uncrumpled-context-switcher-daemon                    Run in foreground with defaults
+  uncrumpled-context-switcher-daemon -d                 Run as a background daemon
+  uncrumpled-context-switcher-daemon -d -V              Daemonize with verbose logging
+  uncrumpled-context-switcher-daemon --socket-path /var/run/uncrumpled-context-switcher.sock
 
 Linux (systemd):
   To run as a systemd user service:
-    systemctl --user enable uncrumpled
-    systemctl --user start uncrumpled
+    systemctl --user enable uncrumpled-context-switcher
+    systemctl --user start uncrumpled-context-switcher
 
   To view logs:
-    journalctl --user -u uncrumpled -f
+    journalctl --user -u uncrumpled-context-switcher -f
 
 macOS (launchd):
   To run as a launchd user agent:
-    launchctl load ~/Library/LaunchAgents/com.uncrumpled.daemon.plist
+    launchctl load ~/Library/LaunchAgents/com.uncrumpled-context-switcher.daemon.plist
 
   To view logs:
-    tail -f ~/Library/Logs/uncrumpled/daemon.log
+    tail -f ~/Library/Logs/uncrumpled-context-switcher/daemon.log
 
 Windows:
   To install as a startup application:
@@ -245,10 +245,10 @@ Windows:
   To install as a Windows service (requires Admin):
     deploy\windows\install.bat --service
 
-  Configuration: %APPDATA%\uncrumpled\config.toml
-  Logs: %LOCALAPPDATA%\uncrumpled\logs\
+  Configuration: %APPDATA%\uncrumpled-context-switcher\config.toml
+  Logs: %LOCALAPPDATA%\uncrumpled-context-switcher\logs\
 
-For more information, visit: https://github.com/uncrumpled/context-switcher
+For more information, visit: https://github.com/uncrumpled/uncrumpled-context-switcher
 END
     print(help_text);
 }
@@ -699,7 +699,7 @@ main :: () {
     // Handle errors
     if config.has_error {
         print("Error: %\n", config.error_message);
-        print("Try 'uncrumpled-daemon --help' for more information.\n");
+        print("Try 'uncrumpled-context-switcher-daemon --help' for more information.\n");
         exit(1);
     }
 

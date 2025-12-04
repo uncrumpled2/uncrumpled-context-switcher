@@ -90,7 +90,7 @@ get_xdg_runtime_dir :: () -> string {
 get_uncrumpled_config_dir :: () -> string {
     config_home := get_xdg_config_home();
     defer free(config_home);
-    return tprint("%/uncrumpled", config_home);
+    return tprint("%/uncrumpled-context-switcher", config_home);
 }
 
 // Get the uncrumpled config file path
@@ -104,21 +104,21 @@ get_uncrumpled_config_path :: () -> string {
 get_uncrumpled_data_dir :: () -> string {
     data_home := get_xdg_data_home();
     defer free(data_home);
-    return tprint("%/uncrumpled", data_home);
+    return tprint("%/uncrumpled-context-switcher", data_home);
 }
 
 // Get the uncrumpled state directory path (for logs, state files)
 get_uncrumpled_state_dir :: () -> string {
     state_home := get_xdg_state_home();
     defer free(state_home);
-    return tprint("%/uncrumpled", state_home);
+    return tprint("%/uncrumpled-context-switcher", state_home);
 }
 
 // Get the uncrumpled cache directory path
 get_uncrumpled_cache_dir :: () -> string {
     cache_home := get_xdg_cache_home();
     defer free(cache_home);
-    return tprint("%/uncrumpled", cache_home);
+    return tprint("%/uncrumpled-context-switcher", cache_home);
 }
 
 // Get the preferred socket path (XDG_RUNTIME_DIR or /tmp fallback)
@@ -126,11 +126,11 @@ get_uncrumpled_socket_path :: () -> string {
     runtime_dir := get_xdg_runtime_dir();
     if runtime_dir.count > 0 {
         defer free(runtime_dir);
-        return tprint("%/uncrumpled/uncrumpled.sock", runtime_dir);
+        return tprint("%/uncrumpled-context-switcher/uncrumpled-context-switcher.sock", runtime_dir);
     }
 
     // Fallback to /tmp
-    return copy_string("/tmp/uncrumpled.sock");
+    return copy_string("/tmp/uncrumpled-context-switcher.sock");
 }
 
 // Get the PID file path
@@ -138,11 +138,11 @@ get_uncrumpled_pid_path :: () -> string {
     runtime_dir := get_xdg_runtime_dir();
     if runtime_dir.count > 0 {
         defer free(runtime_dir);
-        return tprint("%/uncrumpled/uncrumpled.pid", runtime_dir);
+        return tprint("%/uncrumpled-context-switcher/uncrumpled-context-switcher.pid", runtime_dir);
     }
 
     // Fallback to /tmp
-    return copy_string("/tmp/uncrumpled.pid");
+    return copy_string("/tmp/uncrumpled-context-switcher.pid");
 }
 
 // Helper to get environment variable

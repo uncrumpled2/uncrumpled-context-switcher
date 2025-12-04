@@ -1,0 +1,32 @@
+# Uncrumpled Context Switcher - systemd Socket Activation
+#
+# This file enables socket activation for the Uncrumpled Context Switcher daemon.
+# The daemon will be started on-demand when a client connects.
+#
+# Installation:
+#   mkdir -p ~/.config/systemd/user
+#   cp uncrumpled-context-switcher.socket ~/.config/systemd/user/
+#   cp uncrumpled-context-switcher-socket.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable uncrumpled-context-switcher.socket
+#   systemctl --user start uncrumpled-context-switcher.socket
+#
+# Test:
+#   nc -U $XDG_RUNTIME_DIR/uncrumpled-context-switcher/uncrumpled-context-switcher.sock
+
+[Unit]
+Description=Uncrumpled Context Switcher Socket
+Documentation=https://github.com/uncrumpled/uncrumpled-context-switcher
+
+[Socket]
+ListenStream=%t/uncrumpled-context-switcher/uncrumpled-context-switcher.sock
+SocketMode=0600
+
+# Remove stale socket file on start
+RemoveOnStop=yes
+
+# Accept connections in the daemon
+Accept=no
+
+[Install]
+WantedBy=sockets.target
