@@ -148,7 +148,7 @@ History_Manager :: struct {
 
 get_history_path :: () -> string {
     dir := get_history_dir();
-    defer free(dir);
+    // Note: dir is from tprint() or a literal, so don't free it
     return tprint("%/history.json", dir);
 }
 
