@@ -7,3 +7,6 @@
 [submodule "modules/jai-toml-c"]
 	path = modules/jai-toml-c
 	url = git@github.com:uncrumpled2/jai-toml-c.git
+[submodule "modules/jai-system-hotkey"]
+	path = modules/jai-system-hotkey
+	url = git@github.com:uncrumpled2/jai-system-hotkey.git

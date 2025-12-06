@@ -30,6 +30,9 @@ User_Config :: struct {
     // Daemon settings
     daemon: Daemon_Settings;
 
+    // Hotkey settings
+    hotkey: Hotkey_Config;
+
     // Parsing state
     has_error: bool;
     error_message: string;
@@ -88,6 +91,23 @@ Daemon_Settings :: struct {
     log_level:                 string;  // "debug", "info", "warn", "error"
 }
 
+// Hotkey configuration
+Hotkey_Config :: struct {
+    enabled:   bool;    // Whether hotkey is enabled
+    key:       string;  // Key name (e.g., "P", "Space", "F12")
+    modifiers: string;  // Modifier string (e.g., "Ctrl+Alt", "Ctrl+Shift")
+}
+
+// Preset hotkey options for install scripts
+Hotkey_Preset :: enum {
+    NONE;              // No hotkey
+    CTRL_ALT_P;        // Ctrl+Alt+P (default)
+    CTRL_SHIFT_SPACE;  // Ctrl+Shift+Space
+    SUPER_P;           // Super/Windows+P
+    F12;               // F12 key alone
+    CUSTOM;            // Custom user-defined
+}
+
 // ============================================================================
 // Default Configuration
 // ============================================================================
@@ -114,6 +134,11 @@ create_default_config :: () -> User_Config {
     config.daemon.subscriber_timeout_seconds = 90;
     config.daemon.max_log_entries = 1000;
     config.daemon.log_level = copy_string("info");
+
+    // Default hotkey settings - Ctrl+Alt+P
+    config.hotkey.enabled = true;
+    config.hotkey.key = copy_string("P");
+    config.hotkey.modifiers = copy_string("Ctrl+Alt");
 
     return config;
 }
@@ -168,6 +193,9 @@ parse_config_string :: (toml_content: string, config: User_Config = .{}) -> User
 
     // Parse [daemon] section
     parse_daemon_section(table, *result);
+
+    // Parse [hotkey] section
+    parse_hotkey_section(table, *result);
 
     return result, !result.has_error;
 }
@@ -368,6 +396,28 @@ parse_daemon_section :: (root: *toml.Toml_Table, config: *User_Config) {
     }
 }
 
+parse_hotkey_section :: (root: *toml.Toml_Table, config: *User_Config) {
+    hotkey := toml.get_table(root, "hotkey");
+    if hotkey == null return;
+
+    enabled, enabled_ok := toml.get_bool(hotkey, "enabled");
+    if enabled_ok {
+        config.hotkey.enabled = enabled;
+    }
+
+    key, key_ok := toml.get_string(hotkey, "key");
+    if key_ok {
+        free(config.hotkey.key);
+        config.hotkey.key = copy_string(key);
+    }
+
+    modifiers, modifiers_ok := toml.get_string(hotkey, "modifiers");
+    if modifiers_ok {
+        free(config.hotkey.modifiers);
+        config.hotkey.modifiers = copy_string(modifiers);
+    }
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -473,6 +523,10 @@ free_user_config :: (config: *User_Config) {
     // Free daemon settings
     if config.daemon.socket_path.count > 0 free(config.daemon.socket_path);
     if config.daemon.log_level.count > 0 free(config.daemon.log_level);
+
+    // Free hotkey settings
+    if config.hotkey.key.count > 0 free(config.hotkey.key);
+    if config.hotkey.modifiers.count > 0 free(config.hotkey.modifiers);
 
     // Free error message and source path
     if config.error_message.count > 0 free(config.error_message);
@@ -611,4 +665,94 @@ load_config_or_default :: (path: string) -> User_Config {
 
     // For other errors (like parse errors), keep the error
     return config;
+}
+
+// ============================================================================
+// Hotkey Preset Helpers
+// ============================================================================
+
+// Get hotkey config from a preset
+get_hotkey_from_preset :: (preset: Hotkey_Preset) -> Hotkey_Config {
+    config: Hotkey_Config;
+
+    if preset == {
+        case .NONE;
+            config.enabled = false;
+            config.key = copy_string("");
+            config.modifiers = copy_string("");
+
+        case .CTRL_ALT_P;
+            config.enabled = true;
+            config.key = copy_string("P");
+            config.modifiers = copy_string("Ctrl+Alt");
+
+        case .CTRL_SHIFT_SPACE;
+            config.enabled = true;
+            config.key = copy_string("Space");
+            config.modifiers = copy_string("Ctrl+Shift");
+
+        case .SUPER_P;
+            config.enabled = true;
+            config.key = copy_string("P");
+            config.modifiers = copy_string("Super");
+
+        case .F12;
+            config.enabled = true;
+            config.key = copy_string("F12");
+            config.modifiers = copy_string("");
+
+        case .CUSTOM;
+            // Custom requires manual configuration
+            config.enabled = true;
+            config.key = copy_string("");
+            config.modifiers = copy_string("");
+    }
+
+    return config;
+}
+
+// Convert a preset to a display string (for install script prompts)
+hotkey_preset_to_display :: (preset: Hotkey_Preset) -> string {
+    if preset == {
+        case .NONE;              return "None (disable hotkey)";
+        case .CTRL_ALT_P;        return "Ctrl+Alt+P";
+        case .CTRL_SHIFT_SPACE;  return "Ctrl+Shift+Space";
+        case .SUPER_P;           return "Super+P (Windows/Command+P)";
+        case .F12;               return "F12";
+        case .CUSTOM;            return "Custom (configure in config.toml)";
+    }
+    return "Unknown";
+}
+
+// Convert a display string to preset enum
+display_to_hotkey_preset :: (display: string) -> Hotkey_Preset {
+    if display == "None (disable hotkey)"           return .NONE;
+    if display == "Ctrl+Alt+P"                      return .CTRL_ALT_P;
+    if display == "Ctrl+Shift+Space"                return .CTRL_SHIFT_SPACE;
+    if display == "Super+P (Windows/Command+P)"     return .SUPER_P;
+    if display == "F12"                             return .F12;
+    if display == "Custom (configure in config.toml)" return .CUSTOM;
+    return .CTRL_ALT_P;  // Default
+}
+
+// Get hotkey config as TOML section string (for config file generation)
+hotkey_config_to_toml :: (config: *Hotkey_Config) -> string {
+    if !config.enabled {
+        return copy_string("[hotkey]\nenabled = false\n");
+    }
+
+    return copy_string(tprint(#string END
+[hotkey]
+enabled = true
+key = "%"
+modifiers = "%"
+END
+        , config.key, config.modifiers));
+}
+
+// Get the full hotkey as a human-readable string
+hotkey_config_to_string :: (config: *Hotkey_Config) -> string {
+    if !config.enabled return copy_string("(disabled)");
+    if config.modifiers.count == 0 return copy_string(config.key);
+    return copy_string(tprint("%+%", config.modifiers, config.key));
 }

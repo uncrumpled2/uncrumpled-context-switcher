@@ -43,6 +43,15 @@ register_config_parser_tests :: (register: (name: string, proc: () -> bool, cate
     // Utility tests
     register("config/param_type_to_string", test_param_type_to_string, "unit");
     register("config/expand_path_tilde", test_expand_path_tilde, "unit");
+
+    // Hotkey config tests
+    register("config/hotkey_default", test_hotkey_default, "unit");
+    register("config/hotkey_parse_section", test_hotkey_parse_section, "unit");
+    register("config/hotkey_parse_disabled", test_hotkey_parse_disabled, "unit");
+    register("config/hotkey_preset_to_config", test_hotkey_preset_to_config, "unit");
+    register("config/hotkey_preset_display", test_hotkey_preset_display, "unit");
+    register("config/hotkey_config_to_toml", test_hotkey_config_to_toml, "unit");
+    register("config/hotkey_config_to_string", test_hotkey_config_to_string, "unit");
 }
 
 //
@@ -730,6 +739,193 @@ test_expand_path_tilde :: () -> bool {
     // Test empty path
     empty_result := expand_path("");
     config_test_assert(*state, empty_result.count == 0, "Empty path should return empty");
+
+    return state.failed == 0;
+}
+
+//
+// Hotkey Config Tests
+//
+
+test_hotkey_default :: () -> bool {
+    state: Config_Test_State;
+
+    config := create_default_config();
+    defer free_user_config(*config);
+
+    // Default hotkey should be Ctrl+Alt+P
+    config_test_assert(*state, config.hotkey.enabled, "Default hotkey should be enabled");
+    config_test_assert(*state, config.hotkey.key == "P", "Default key should be 'P'");
+    config_test_assert(*state, config.hotkey.modifiers == "Ctrl+Alt", "Default modifiers should be 'Ctrl+Alt'");
+
+    return state.failed == 0;
+}
+
+test_hotkey_parse_section :: () -> bool {
+    state: Config_Test_State;
+
+    toml_doc := #string TOML
+[hotkey]
+enabled = true
+key = "Space"
+modifiers = "Ctrl+Shift"
+TOML;
+
+    config, success := parse_config_string(toml_doc);
+    defer free_user_config(*config);
+
+    config_test_assert(*state, success, tprint("Parse should succeed: %", config.error_message));
+
+    if success {
+        config_test_assert(*state, config.hotkey.enabled, "Hotkey should be enabled");
+        config_test_assert(*state, config.hotkey.key == "Space", tprint("Key should be 'Space', got '%'", config.hotkey.key));
+        config_test_assert(*state, config.hotkey.modifiers == "Ctrl+Shift", tprint("Modifiers should be 'Ctrl+Shift', got '%'", config.hotkey.modifiers));
+    }
+
+    return state.failed == 0;
+}
+
+test_hotkey_parse_disabled :: () -> bool {
+    state: Config_Test_State;
+
+    toml_doc := #string TOML
+[hotkey]
+enabled = false
+TOML;
+
+    config, success := parse_config_string(toml_doc);
+    defer free_user_config(*config);
+
+    config_test_assert(*state, success, "Parse should succeed");
+
+    if success {
+        config_test_assert(*state, !config.hotkey.enabled, "Hotkey should be disabled");
+    }
+
+    return state.failed == 0;
+}
+
+test_hotkey_preset_to_config :: () -> bool {
+    state: Config_Test_State;
+
+    // Test NONE preset
+    none_cfg := get_hotkey_from_preset(.NONE);
+    defer {
+        if none_cfg.key.count > 0 free(none_cfg.key);
+        if none_cfg.modifiers.count > 0 free(none_cfg.modifiers);
+    }
+    config_test_assert(*state, !none_cfg.enabled, "NONE preset should be disabled");
+
+    // Test CTRL_ALT_P preset
+    ctrl_alt_p := get_hotkey_from_preset(.CTRL_ALT_P);
+    defer {
+        if ctrl_alt_p.key.count > 0 free(ctrl_alt_p.key);
+        if ctrl_alt_p.modifiers.count > 0 free(ctrl_alt_p.modifiers);
+    }
+    config_test_assert(*state, ctrl_alt_p.enabled, "CTRL_ALT_P should be enabled");
+    config_test_assert(*state, ctrl_alt_p.key == "P", "CTRL_ALT_P key should be 'P'");
+    config_test_assert(*state, ctrl_alt_p.modifiers == "Ctrl+Alt", "CTRL_ALT_P modifiers should be 'Ctrl+Alt'");
+
+    // Test CTRL_SHIFT_SPACE preset
+    ctrl_shift_space := get_hotkey_from_preset(.CTRL_SHIFT_SPACE);
+    defer {
+        if ctrl_shift_space.key.count > 0 free(ctrl_shift_space.key);
+        if ctrl_shift_space.modifiers.count > 0 free(ctrl_shift_space.modifiers);
+    }
+    config_test_assert(*state, ctrl_shift_space.enabled, "CTRL_SHIFT_SPACE should be enabled");
+    config_test_assert(*state, ctrl_shift_space.key == "Space", "CTRL_SHIFT_SPACE key should be 'Space'");
+    config_test_assert(*state, ctrl_shift_space.modifiers == "Ctrl+Shift", "CTRL_SHIFT_SPACE modifiers should be 'Ctrl+Shift'");
+
+    // Test F12 preset
+    f12 := get_hotkey_from_preset(.F12);
+    defer {
+        if f12.key.count > 0 free(f12.key);
+        if f12.modifiers.count > 0 free(f12.modifiers);
+    }
+    config_test_assert(*state, f12.enabled, "F12 should be enabled");
+    config_test_assert(*state, f12.key == "F12", "F12 key should be 'F12'");
+    config_test_assert(*state, f12.modifiers.count == 0, "F12 should have no modifiers");
+
+    return state.failed == 0;
+}
+
+test_hotkey_preset_display :: () -> bool {
+    state: Config_Test_State;
+
+    config_test_assert(*state, hotkey_preset_to_display(.NONE) == "None (disable hotkey)", "NONE display string");
+    config_test_assert(*state, hotkey_preset_to_display(.CTRL_ALT_P) == "Ctrl+Alt+P", "CTRL_ALT_P display string");
+    config_test_assert(*state, hotkey_preset_to_display(.CTRL_SHIFT_SPACE) == "Ctrl+Shift+Space", "CTRL_SHIFT_SPACE display string");
+    config_test_assert(*state, hotkey_preset_to_display(.F12) == "F12", "F12 display string");
+
+    // Test roundtrip
+    config_test_assert(*state, display_to_hotkey_preset("Ctrl+Alt+P") == .CTRL_ALT_P, "Roundtrip CTRL_ALT_P");
+    config_test_assert(*state, display_to_hotkey_preset("None (disable hotkey)") == .NONE, "Roundtrip NONE");
+
+    return state.failed == 0;
+}
+
+test_hotkey_config_to_toml :: () -> bool {
+    state: Config_Test_State;
+
+    // Test enabled config
+    enabled_cfg := get_hotkey_from_preset(.CTRL_ALT_P);
+    defer {
+        if enabled_cfg.key.count > 0 free(enabled_cfg.key);
+        if enabled_cfg.modifiers.count > 0 free(enabled_cfg.modifiers);
+    }
+    enabled_toml := hotkey_config_to_toml(*enabled_cfg);
+    defer free(enabled_toml);
+
+    config_test_assert(*state, contains(enabled_toml, "enabled = true"), "TOML should contain 'enabled = true'");
+    config_test_assert(*state, contains(enabled_toml, "key = \"P\""), "TOML should contain key");
+    config_test_assert(*state, contains(enabled_toml, "modifiers = \"Ctrl+Alt\""), "TOML should contain modifiers");
+
+    // Test disabled config
+    disabled_cfg := get_hotkey_from_preset(.NONE);
+    defer {
+        if disabled_cfg.key.count > 0 free(disabled_cfg.key);
+        if disabled_cfg.modifiers.count > 0 free(disabled_cfg.modifiers);
+    }
+    disabled_toml := hotkey_config_to_toml(*disabled_cfg);
+    defer free(disabled_toml);
+
+    config_test_assert(*state, contains(disabled_toml, "enabled = false"), "Disabled TOML should contain 'enabled = false'");
+
+    return state.failed == 0;
+}
+
+test_hotkey_config_to_string :: () -> bool {
+    state: Config_Test_State;
+
+    // Test enabled with modifiers
+    cfg1 := get_hotkey_from_preset(.CTRL_ALT_P);
+    defer {
+        if cfg1.key.count > 0 free(cfg1.key);
+        if cfg1.modifiers.count > 0 free(cfg1.modifiers);
+    }
+    str1 := hotkey_config_to_string(*cfg1);
+    defer free(str1);
+    config_test_assert(*state, str1 == "Ctrl+Alt+P", tprint("Expected 'Ctrl+Alt+P', got '%'", str1));
+
+    // Test enabled without modifiers
+    cfg2 := get_hotkey_from_preset(.F12);
+    defer {
+        if cfg2.key.count > 0 free(cfg2.key);
+        if cfg2.modifiers.count > 0 free(cfg2.modifiers);
+    }
+    str2 := hotkey_config_to_string(*cfg2);
+    defer free(str2);
+    config_test_assert(*state, str2 == "F12", tprint("Expected 'F12', got '%'", str2));
+
+    // Test disabled
+    cfg3 := get_hotkey_from_preset(.NONE);
+    defer {
+        if cfg3.key.count > 0 free(cfg3.key);
+        if cfg3.modifiers.count > 0 free(cfg3.modifiers);
+    }
+    str3 := hotkey_config_to_string(*cfg3);
+    defer free(str3);
+    config_test_assert(*state, str3 == "(disabled)", tprint("Expected '(disabled)', got '%'", str3));
 
     return state.failed == 0;
 }

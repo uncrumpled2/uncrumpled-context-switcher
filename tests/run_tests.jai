@@ -30,6 +30,8 @@
 #load "unit/test_heartbeat.jai";
 #load "unit/test_sdk.jai";
 #load "unit/test_platform.jai";
+#load "unit/test_hotkey.jai";
+#load "unit/test_history.jai";
 
 // Integration / E2E tests
 #load "integration/test_e2e.jai";
@@ -459,6 +461,8 @@ main :: () {
     register_heartbeat_tests(register_test);
     register_sdk_tests(register_test);
     register_platform_tests();
+    register_hotkey_tests();
+    register_history_tests();
 
     // Register e2e/integration tests
     register_e2e_tests(register_test);
