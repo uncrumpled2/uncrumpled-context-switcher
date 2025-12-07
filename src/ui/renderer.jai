@@ -1,6 +1,14 @@
 #import "Basic";
 #import "SDL";
+#import "String";
 // skia and types.jai loaded from main.jai
+
+#if OS == .WINDOWS {
+    #scope_file
+    kernel32_renderer :: #system_library "kernel32";
+    GetModuleFileNameA :: (hModule: *void, lpFilename: *u8, nSize: u32) -> u32 #foreign kernel32_renderer;
+    #scope_export
+}
 
 // SDL_PIXELFORMAT_ABGR8888 for little-endian (same as RGBA32)
 SDL_PIXELFORMAT_ABGR8888 :: 0x16762004;
@@ -101,6 +109,35 @@ init_renderer :: (window: *SDL_Window) -> *Renderer_Context {
     return ctx;
 }
 
+// Get the directory containing the executable
+get_executable_directory :: () -> string {
+    #if OS == .WINDOWS {
+        buffer: [512]u8;
+        len := GetModuleFileNameA(null, buffer.data, 512);
+        if len == 0 return "";
+
+        // Find the last backslash
+        last_sep := -1;
+        for i: 0..cast(s64)len-1 {
+            if buffer[i] == #char "\\" {
+                last_sep = i;
+            }
+        }
+
+        if last_sep <= 0 return "";
+
+        result: string;
+        result.data = alloc(last_sep + 1);
+        memcpy(result.data, buffer.data, last_sep);
+        result.count = last_sep;
+        return result;
+    } else {
+        // On Linux/macOS, we can use /proc/self/exe or similar
+        // For now, return empty and rely on relative paths working
+        return "";
+    }
+}
+
 init_font :: (ctx: *Renderer_Context) {
     // SkFontStyle for normal weight (400), normal width (5), upright (0)
     // Packed as: weight | (width << 16) | (slant << 24)
@@ -108,30 +145,48 @@ init_font :: (ctx: *Renderer_Context) {
     normal_style.fValue = 400 | (5 << 16) | (0 << 24);
 
     #if OS == .WINDOWS {
-        // Windows: Use RefEmpty font manager and load font directly from file
-        ctx.font_mgr = skia.SkFontMgr.RefEmpty();
+        // Windows: Get executable directory for font path
+        exe_dir := get_executable_directory();
+        defer if exe_dir.count > 0 free(exe_dir);
+
+        fonts_dir: string;
+        if exe_dir.count > 0 {
+            // Convert backslashes to forward slashes for Skia compatibility
+            exe_dir_fwd := replace(exe_dir, "\\", "/");
+            defer free(exe_dir_fwd);
+            fonts_dir = tprint("%/fonts", exe_dir_fwd);
+        } else {
+            fonts_dir = "fonts";
+        }
+
+        print("Looking for fonts in: %\n", fonts_dir);
+
+        // Use custom directory font manager (same as Linux/macOS)
+        fonts_dir_cstr := to_c_string(fonts_dir);
+        defer free(fonts_dir_cstr);
+        ctx.font_mgr = skia.SkFontMgr_New_Custom_Directory(fonts_dir_cstr);
 
         if ctx.font_mgr.fPtr {
-            // Try loading Source Code Pro from fonts directory
-            ctx.typeface = skia.SkFontMgr.makeFromFile(ctx.font_mgr.fPtr, "fonts/SourceCodePro-Regular.ttf".data, 0);
+            // Try to match "Source Code Pro" family
+            ctx.typeface = skia.SkFontMgr.matchFamilyStyle(ctx.font_mgr.fPtr, "Source Code Pro".data, normal_style);
             if ctx.typeface.fPtr {
                 print("Loaded font: Source Code Pro from fonts/\n");
             }
         }
 
-        // Fallback: try Windows system fonts
+        // Fallback: try Windows system fonts directory
         if !ctx.typeface.fPtr {
-            SYSTEM_FONT_PATHS :: string.[
-                "C:/Windows/Fonts/consola.ttf",   // Consolas
-                "C:/Windows/Fonts/cour.ttf",      // Courier New
-                "C:/Windows/Fonts/lucon.ttf",     // Lucida Console
-            ];
-
-            for path: SYSTEM_FONT_PATHS {
-                ctx.typeface = skia.SkFontMgr.makeFromFile(ctx.font_mgr.fPtr, path.data, 0);
+            print("Trying Windows system fonts...\n");
+            system_font_mgr := skia.SkFontMgr_New_Custom_Directory("C:/Windows/Fonts".data);
+            if system_font_mgr.fPtr {
+                // Try Consolas first (good monospace font on Windows)
+                ctx.typeface = skia.SkFontMgr.matchFamilyStyle(system_font_mgr.fPtr, "Consolas".data, normal_style);
+                if !ctx.typeface.fPtr {
+                    ctx.typeface = skia.SkFontMgr.matchFamilyStyle(system_font_mgr.fPtr, "Courier New".data, normal_style);
+                }
                 if ctx.typeface.fPtr {
-                    print("Loaded fallback font from: %\n", path);
-                    break;
+                    ctx.font_mgr = system_font_mgr;
+                    print("Loaded fallback font from Windows system fonts\n");
                 }
             }
         }

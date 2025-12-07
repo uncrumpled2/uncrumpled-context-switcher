@@ -122,8 +122,9 @@ SkFont_destroy :: (font: *SkFont) {
 // =============================================================================
 // Custom Font Manager Creation (Windows mangled symbols)
 // =============================================================================
-// NOTE: These need Windows-specific mangled symbol names.
-// They will be added once we verify the exact symbols exported from skia.dll
+
+SkFontMgr_New_Custom_Directory :: (path: *u8) -> sk_sp(SkFontMgr) #cpp_return_type_is_non_pod #foreign libskia "?SkFontMgr_New_Custom_Directory@@YA?AV?$sk_sp@VSkFontMgr@@@@PEBD@Z";
+SkFontMgr_New_Custom_Empty :: () -> sk_sp(SkFontMgr) #cpp_return_type_is_non_pod #foreign libskia "?SkFontMgr_New_Custom_Empty@@YA?AV?$sk_sp@VSkFontMgr@@@@XZ";
 
 
 //

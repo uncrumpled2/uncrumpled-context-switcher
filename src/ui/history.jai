@@ -149,7 +149,11 @@ History_Manager :: struct {
 get_history_path :: () -> string {
     dir := get_history_dir();
     // Note: dir is from tprint() or a literal, so don't free it
-    return tprint("%/history.json", dir);
+    #if OS == .WINDOWS {
+        return tprint("%\\history.json", dir);
+    } else {
+        return tprint("%/history.json", dir);
+    }
 }
 
 // ============================================================================

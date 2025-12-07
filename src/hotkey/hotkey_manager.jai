@@ -116,22 +116,21 @@ get_config_path :: () -> string {
         // Follow XDG Base Directory specification
         xdg_config_home := config_parser.get_home_directory();
         if xdg_config_home.count > 0 {
-            return copy_string(tprint("%/.config/uncrumpled/config.toml", xdg_config_home));
+            return copy_string(tprint("%/.config/uncrumpled-context-switcher/config.toml", xdg_config_home));
         }
-        return copy_string("~/.config/uncrumpled/config.toml");
+        return copy_string("~/.config/uncrumpled-context-switcher/config.toml");
     } else #if OS == .MACOS {
-        // Use ~/Library/Application Support/uncrumpled/
+        // Use ~/Library/Application Support/uncrumpled-context-switcher/
         home := config_parser.get_home_directory();
         if home.count > 0 {
-            return copy_string(tprint("%/Library/Application Support/uncrumpled/config.toml", home));
+            return copy_string(tprint("%/Library/Application Support/uncrumpled-context-switcher/config.toml", home));
         }
-        return copy_string("~/Library/Application Support/uncrumpled/config.toml");
+        return copy_string("~/Library/Application Support/uncrumpled-context-switcher/config.toml");
     } else #if OS == .WINDOWS {
-        // Use %APPDATA%\uncrumpled\
-        // For now, fallback to home directory approach
-        return copy_string("%APPDATA%\\uncrumpled\\config.toml");
+        // Use %APPDATA%\uncrumpled-context-switcher\
+        return copy_string("%APPDATA%\\uncrumpled-context-switcher\\config.toml");
     } else {
-        return copy_string("~/.config/uncrumpled/config.toml");
+        return copy_string("~/.config/uncrumpled-context-switcher/config.toml");
     }
 }
 

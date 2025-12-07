@@ -4,7 +4,7 @@
 // The config file defines allowed values, tag definitions, parameter schemas,
 // and daemon settings.
 //
-// Config file location: ~/.config/uncrumpled/config.toml
+// Config file location: ~/.config/uncrumpled-context-switcher/config.toml
 
 #import "Basic";
 #import "String";
@@ -461,7 +461,31 @@ expand_path :: (path: string) -> string {
         }
     }
 
-    // TODO: Expand environment variables on Windows (%APPDATA%, etc.)
+    #if OS == .WINDOWS {
+        // Expand Windows environment variables like %APPDATA%
+        if path.count > 2 && path[0] == #char "%" {
+            // Find closing %
+            end_idx := -1;
+            for i: 1..path.count-1 {
+                if path[i] == #char "%" {
+                    end_idx = i;
+                    break;
+                }
+            }
+            if end_idx > 1 {
+                var_name: string;
+                var_name.data = path.data + 1;
+                var_name.count = end_idx - 1;
+
+                var_value := get_env_windows(var_name);
+                if var_value.count > 0 {
+                    defer free(var_value);
+                    rest := advance(path, end_idx + 1);
+                    return copy_string(tprint("%1%2", var_value, rest));
+                }
+            }
+        }
+    }
 
     return copy_string(path);
 }
@@ -474,8 +498,40 @@ get_home_directory :: () -> string {
         }
         return "";
     } else {
-        // Windows - simplified for now
-        return "";
+        // Windows - use USERPROFILE
+        return get_env_windows("USERPROFILE");
+    }
+}
+
+#if OS == .WINDOWS {
+    #scope_file
+    kernel32_config :: #system_library "kernel32";
+    GetEnvironmentVariableA :: (lpName: *u8, lpBuffer: *u8, nSize: u32) -> u32 #foreign kernel32_config;
+    #scope_export
+
+    get_env_windows :: (name: string) -> string {
+        name_cstr := to_c_string(name);
+        defer free(name_cstr);
+
+        // First call to get required buffer size
+        required_size := GetEnvironmentVariableA(name_cstr, null, 0);
+        if required_size == 0 {
+            return "";
+        }
+
+        // Allocate buffer and get value
+        buffer := cast(*u8) alloc(required_size);
+        actual_size := GetEnvironmentVariableA(name_cstr, buffer, required_size);
+
+        if actual_size == 0 {
+            free(buffer);
+            return "";
+        }
+
+        result: string;
+        result.data = buffer;
+        result.count = cast(s64) actual_size;
+        return result;
     }
 }
 
@@ -645,9 +701,9 @@ validate_param_value :: (config: *User_Config, name: string, value: string) -> b
 // Load user config from the default location
 load_user_config :: () -> User_Config, bool {
     #if OS == .LINUX || OS == .MACOS {
-        default_path :: "~/.config/uncrumpled/config.toml";
+        default_path :: "~/.config/uncrumpled-context-switcher/config.toml";
     } else {
-        default_path :: "%APPDATA%\\uncrumpled\\config.toml";
+        default_path :: "%APPDATA%\\uncrumpled-context-switcher\\config.toml";
     }
 
     config, success := parse_config_file(default_path);
