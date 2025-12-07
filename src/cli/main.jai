@@ -26,7 +26,9 @@
 
 #import "Basic";
 #import "String";
-#import "POSIX";
+#if OS == .LINUX || OS == .MACOS {
+    #import "POSIX";
+}
 #import "File";
 
 // ============================================================================
@@ -53,6 +55,58 @@ cli_socket :: (domain: s32, type: s32, protocol: s32) -> s32 #foreign libc "sock
 cli_connect :: (sockfd: s32, addr: *void, addrlen: u32) -> s32 #foreign libc "connect";
 
 } // OS == .LINUX || OS == .MACOS
+
+#if OS == .WINDOWS {
+
+kernel32 :: #system_library "kernel32";
+
+// Windows type aliases
+HANDLE :: *void;
+DWORD :: u32;
+BOOL :: s32;
+LPCSTR :: *u8;
+LPVOID :: *void;
+
+// Windows constants
+INVALID_HANDLE_VALUE :: cast(HANDLE) -1;
+GENERIC_READ :: 0x80000000;
+GENERIC_WRITE :: 0x40000000;
+OPEN_EXISTING :: 3;
+ERROR_PIPE_BUSY :: 231;
+NMPWAIT_WAIT_FOREVER :: 0xFFFFFFFF;
+
+// Windows API functions
+CreateFileA :: (
+    lpFileName: LPCSTR,
+    dwDesiredAccess: DWORD,
+    dwShareMode: DWORD,
+    lpSecurityAttributes: LPVOID,
+    dwCreationDisposition: DWORD,
+    dwFlagsAndAttributes: DWORD,
+    hTemplateFile: HANDLE
+) -> HANDLE #foreign kernel32;
+
+ReadFile :: (
+    hFile: HANDLE,
+    lpBuffer: LPVOID,
+    nNumberOfBytesToRead: DWORD,
+    lpNumberOfBytesRead: *DWORD,
+    lpOverlapped: LPVOID
+) -> BOOL #foreign kernel32;
+
+WriteFile :: (
+    hFile: HANDLE,
+    lpBuffer: LPVOID,
+    nNumberOfBytesToWrite: DWORD,
+    lpNumberOfBytesWritten: *DWORD,
+    lpOverlapped: LPVOID
+) -> BOOL #foreign kernel32;
+
+CloseHandle :: (hObject: HANDLE) -> BOOL #foreign kernel32;
+GetLastError :: () -> DWORD #foreign kernel32;
+WaitNamedPipeA :: (lpNamedPipeName: LPCSTR, nTimeOut: DWORD) -> BOOL #foreign kernel32;
+
+} // OS == .WINDOWS
 
 // Version info
 CLI_VERSION :: "0.1.0";
@@ -181,6 +235,24 @@ print_cli_version :: () {
 // Socket Communication
 // ============================================================================
 
+// Helper: convert Jai string to C string
+cli_to_c_string :: (s: string) -> *u8 {
+    if s.count == 0 return null;
+    result := alloc(s.count + 1);
+    memcpy(result, s.data, s.count);
+    (cast(*u8) result)[s.count] = 0;
+    return result;
+}
+
+// Close socket/handle (cross-platform)
+cli_close :: (sock: s32) {
+    #if OS == .LINUX || OS == .MACOS {
+        close(sock);
+    } else #if OS == .WINDOWS {
+        CloseHandle(cast(HANDLE) cast(u64) sock);
+    }
+}
+
 // Connect to daemon socket
 connect_to_daemon :: (socket_path: string) -> s32, bool {
     #if OS == .LINUX || OS == .MACOS {
@@ -209,6 +281,33 @@ connect_to_daemon :: (socket_path: string) -> s32, bool {
         }
 
         return sock, true;
+    } else #if OS == .WINDOWS {
+        // Create null-terminated path
+        c_path := cli_to_c_string(socket_path);
+        defer free(c_path);
+
+        // Wait for the pipe to be available
+        if !WaitNamedPipeA(c_path, 5000) {  // 5 second timeout
+            return -1, false;
+        }
+
+        // Open the pipe
+        handle := CreateFileA(
+            c_path,
+            GENERIC_READ | GENERIC_WRITE,
+            0,  // No sharing
+            null,
+            OPEN_EXISTING,
+            0,
+            null
+        );
+
+        if handle == INVALID_HANDLE_VALUE {
+            return -1, false;
+        }
+
+        // Store handle as s32 (we'll cast back when using it)
+        return cast(s32) cast(u64) handle, true;
     } else {
         return -1, false;
     }
@@ -231,16 +330,36 @@ END
     }
 
     // Send request
-    bytes_sent := write(sock, request.data, cast(u64) request.count);
-    if bytes_sent < 0 {
-        return "", false;
+    #if OS == .LINUX || OS == .MACOS {
+        bytes_sent := write(sock, request.data, cast(u64) request.count);
+        if bytes_sent < 0 {
+            return "", false;
+        }
+    } else #if OS == .WINDOWS {
+        bytes_written: DWORD = 0;
+        if !WriteFile(cast(HANDLE) cast(u64) sock, request.data, cast(DWORD) request.count, *bytes_written, null) {
+            return "", false;
+        }
     }
 
     // Receive response
     buffer: [RECV_BUFFER_SIZE] u8;
-    bytes_received := read(sock, buffer.data, RECV_BUFFER_SIZE - 1);
-    if bytes_received <= 0 {
-        return "", false;
+    bytes_received: s64 = 0;
+
+    #if OS == .LINUX || OS == .MACOS {
+        bytes_received = read(sock, buffer.data, RECV_BUFFER_SIZE - 1);
+        if bytes_received <= 0 {
+            return "", false;
+        }
+    } else #if OS == .WINDOWS {
+        bytes_read: DWORD = 0;
+        if !ReadFile(cast(HANDLE) cast(u64) sock, buffer.data, cast(DWORD) (RECV_BUFFER_SIZE - 1), *bytes_read, null) {
+            return "", false;
+        }
+        bytes_received = cast(s64) bytes_read;
+        if bytes_received <= 0 {
+            return "", false;
+        }
     }
 
     // Null-terminate and return
@@ -261,7 +380,7 @@ handle_context_get :: (config: *CLI_Config) -> bool {
         print("Error: Could not connect to daemon at %\n", config.socket_path);
         return false;
     }
-    defer close(sock);
+    defer cli_close(sock);
 
     response, ok := send_request(sock, "context.get");
     if !ok {
@@ -294,7 +413,7 @@ handle_context_add_tag :: (config: *CLI_Config) -> bool {
         print("Error: Could not connect to daemon at %\n", config.socket_path);
         return false;
     }
-    defer close(sock);
+    defer cli_close(sock);
 
     params := tprint("{\"tag\":\"%\"}", tag);
     response, ok := send_request(sock, "context.addTag", params);
@@ -327,7 +446,7 @@ handle_context_remove_tag :: (config: *CLI_Config) -> bool {
         print("Error: Could not connect to daemon at %\n", config.socket_path);
         return false;
     }
-    defer close(sock);
+    defer cli_close(sock);
 
     params := tprint("{\"tag\":\"%\"}", tag);
     response, ok := send_request(sock, "context.removeTag", params);
@@ -353,7 +472,7 @@ handle_service_list :: (config: *CLI_Config) -> bool {
         print("Error: Could not connect to daemon at %\n", config.socket_path);
         return false;
     }
-    defer close(sock);
+    defer cli_close(sock);
 
     response, ok := send_request(sock, "service.list");
     if !ok {
@@ -378,7 +497,7 @@ handle_logs_list :: (config: *CLI_Config) -> bool {
         print("Error: Could not connect to daemon at %\n", config.socket_path);
         return false;
     }
-    defer close(sock);
+    defer cli_close(sock);
 
     limit := "50";
     if config.args.count > 0 {
@@ -410,7 +529,7 @@ handle_ping :: (config: *CLI_Config) -> bool {
         print("Daemon is NOT running or socket is unavailable.\n");
         return false;
     }
-    defer close(sock);
+    defer cli_close(sock);
 
     // Try to get context as a simple ping
     response, ok := send_request(sock, "context.get");

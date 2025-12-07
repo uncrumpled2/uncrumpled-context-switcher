@@ -107,37 +107,67 @@ init_font :: (ctx: *Renderer_Context) {
     normal_style: skia.SkFontStyle;
     normal_style.fValue = 400 | (5 << 16) | (0 << 24);
 
-    // Try loading from fonts directory first using directory-based font manager
-    ctx.font_mgr = skia.SkFontMgr_New_Custom_Directory("fonts".data);
+    #if OS == .WINDOWS {
+        // Windows: Use RefEmpty font manager and load font directly from file
+        ctx.font_mgr = skia.SkFontMgr.RefEmpty();
 
-    if ctx.font_mgr.fPtr {
-        // Try to match "Source Code Pro" family
-        ctx.typeface = skia.SkFontMgr.matchFamilyStyle(ctx.font_mgr.fPtr, "Source Code Pro".data, normal_style);
-        if ctx.typeface.fPtr {
-            print("Loaded font: Source Code Pro from fonts/\n");
+        if ctx.font_mgr.fPtr {
+            // Try loading Source Code Pro from fonts directory
+            ctx.typeface = skia.SkFontMgr.makeFromFile(ctx.font_mgr.fPtr, "fonts/SourceCodePro-Regular.ttf".data, 0);
+            if ctx.typeface.fPtr {
+                print("Loaded font: Source Code Pro from fonts/\n");
+            }
         }
-    }
 
-    // Fallback: try system font directories
-    if !ctx.typeface.fPtr {
-        SYSTEM_FONT_DIRS :: string.[
-            "/usr/share/fonts/truetype/ubuntu",
-            "/usr/share/fonts/truetype/dejavu",
-            "/usr/share/fonts/truetype",
-        ];
+        // Fallback: try Windows system fonts
+        if !ctx.typeface.fPtr {
+            SYSTEM_FONT_PATHS :: string.[
+                "C:/Windows/Fonts/consola.ttf",   // Consolas
+                "C:/Windows/Fonts/cour.ttf",      // Courier New
+                "C:/Windows/Fonts/lucon.ttf",     // Lucida Console
+            ];
 
-        for dir: SYSTEM_FONT_DIRS {
-            font_mgr := skia.SkFontMgr_New_Custom_Directory(dir.data);
-            if font_mgr.fPtr {
-                // Try common monospace fonts
-                ctx.typeface = skia.SkFontMgr.matchFamilyStyle(font_mgr.fPtr, "Ubuntu Mono".data, normal_style);
-                if !ctx.typeface.fPtr {
-                    ctx.typeface = skia.SkFontMgr.matchFamilyStyle(font_mgr.fPtr, "DejaVu Sans Mono".data, normal_style);
-                }
+            for path: SYSTEM_FONT_PATHS {
+                ctx.typeface = skia.SkFontMgr.makeFromFile(ctx.font_mgr.fPtr, path.data, 0);
                 if ctx.typeface.fPtr {
-                    ctx.font_mgr = font_mgr;
-                    print("Loaded fallback font from: %\n", dir);
+                    print("Loaded fallback font from: %\n", path);
                     break;
+                }
+            }
+        }
+    } else {
+        // Linux/macOS: Use custom directory-based font manager
+        ctx.font_mgr = skia.SkFontMgr_New_Custom_Directory("fonts".data);
+
+        if ctx.font_mgr.fPtr {
+            // Try to match "Source Code Pro" family
+            ctx.typeface = skia.SkFontMgr.matchFamilyStyle(ctx.font_mgr.fPtr, "Source Code Pro".data, normal_style);
+            if ctx.typeface.fPtr {
+                print("Loaded font: Source Code Pro from fonts/\n");
+            }
+        }
+
+        // Fallback: try system font directories
+        if !ctx.typeface.fPtr {
+            SYSTEM_FONT_DIRS :: string.[
+                "/usr/share/fonts/truetype/ubuntu",
+                "/usr/share/fonts/truetype/dejavu",
+                "/usr/share/fonts/truetype",
+            ];
+
+            for dir: SYSTEM_FONT_DIRS {
+                font_mgr := skia.SkFontMgr_New_Custom_Directory(dir.data);
+                if font_mgr.fPtr {
+                    // Try common monospace fonts
+                    ctx.typeface = skia.SkFontMgr.matchFamilyStyle(font_mgr.fPtr, "Ubuntu Mono".data, normal_style);
+                    if !ctx.typeface.fPtr {
+                        ctx.typeface = skia.SkFontMgr.matchFamilyStyle(font_mgr.fPtr, "DejaVu Sans Mono".data, normal_style);
+                    }
+                    if ctx.typeface.fPtr {
+                        ctx.font_mgr = font_mgr;
+                        print("Loaded fallback font from: %\n", dir);
+                        break;
+                    }
                 }
             }
         }

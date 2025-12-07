@@ -40,7 +40,9 @@
 
 #import "Basic";
 #import "String";
-#import "POSIX";
+#if OS == .LINUX || OS == .MACOS {
+    #import "POSIX";
+}
 #import "Thread";
 
 // ============================================================================

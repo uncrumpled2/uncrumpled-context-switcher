@@ -23,9 +23,19 @@
 #import "Basic";
 #import "String";
 #import "File";
-#import "POSIX";
+#if OS == .LINUX || OS == .MACOS {
+    #import "POSIX";
+}
 #import "Thread";
 #import "Hash_Table";
+
+// Windows API imports for process management
+#if OS == .WINDOWS {
+    kernel32_main :: #system_library "kernel32";
+    GetCurrentProcessId :: () -> u32 #foreign kernel32_main;
+    OpenProcess :: (dwDesiredAccess: u32, bInheritHandle: s32, dwProcessId: u32) -> *void #foreign kernel32_main;
+    // Note: CloseHandle is defined in ipc.jai which is loaded below
+}
 
 // Load daemon modules (they import their own dependencies like jason, jai-toml-c)
 #load "context_store.jai";
@@ -270,7 +280,11 @@ print_version :: () {
 
 // Write PID to file
 write_pid_file :: (path: string) -> bool {
-    pid := getpid();
+    #if OS == .LINUX || OS == .MACOS {
+        pid := getpid();
+    } else #if OS == .WINDOWS {
+        pid := GetCurrentProcessId();
+    }
     content := tprint("%\n", pid);
     success := write_entire_file(path, content);
     if success {
@@ -306,9 +320,19 @@ check_existing_instance :: (pid_file: string) -> bool {
     }
 
     // Check if process is still running
-    result := kill(cast(s32) pid, 0);  // Signal 0 just checks existence
-    if result == 0 {
-        return true;  // Process exists
+    #if OS == .LINUX || OS == .MACOS {
+        result := kill(cast(s32) pid, 0);  // Signal 0 just checks existence
+        if result == 0 {
+            return true;  // Process exists
+        }
+    } else #if OS == .WINDOWS {
+        // On Windows, try to open the process to check if it exists
+        PROCESS_QUERY_LIMITED_INFORMATION :: 0x1000;
+        handle := OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, cast(u32) pid);
+        if handle != null {
+            CloseHandle(handle);
+            return true;  // Process exists
+        }
     }
 
     // Process doesn't exist, stale PID file

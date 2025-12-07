@@ -12,7 +12,9 @@
 
 #import "Basic";
 #import "String";
-#import "POSIX";
+#if OS == .LINUX || OS == .MACOS {
+    #import "POSIX";
+}
 #import "Thread";
 
 // Maximum number of concurrent client connections
@@ -150,17 +152,25 @@ destroy_ipc_server :: (server: *IPC_Server) {
     // Close all client connections
     for *conn: server.connections {
         if conn.state != .DISCONNECTED {
-            close_connection_locked(server, conn);
+            #if OS == .LINUX || OS == .MACOS {
+                close_connection_locked(server, conn);
+            } else #if OS == .WINDOWS {
+                close_windows_connection(server, conn);
+            }
         }
     }
 
-    // Close server socket
+    // Close server socket/handle
     if server.server_fd >= 0 {
-        close(server.server_fd);
+        #if OS == .LINUX || OS == .MACOS {
+            close(server.server_fd);
+        } else #if OS == .WINDOWS {
+            CloseHandle(cast(HANDLE) cast(u64) server.server_fd);
+        }
         server.server_fd = -1;
     }
 
-    // Remove socket file
+    // Remove socket file (Unix only)
     #if OS == .LINUX || OS == .MACOS {
         if server.socket_path.count > 0 {
             unlink(ipc_to_c_string(server.socket_path));
@@ -334,7 +344,11 @@ close_connection :: (server: *IPC_Server, conn: *IPC_Connection) {
     lock(*server.mutex);
     defer unlock(*server.mutex);
 
-    close_connection_locked(server, conn);
+    #if OS == .LINUX || OS == .MACOS {
+        close_connection_locked(server, conn);
+    } else #if OS == .WINDOWS {
+        close_windows_connection(server, conn);
+    }
 }
 
 // Get connection by ID

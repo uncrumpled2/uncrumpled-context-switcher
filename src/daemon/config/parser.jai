@@ -9,7 +9,9 @@
 #import "Basic";
 #import "String";
 #import "File";
-#import "POSIX";
+#if OS == .LINUX || OS == .MACOS {
+    #import "POSIX";
+}
 toml :: #import,dir "../../../modules/jai-toml-c";
 
 // ============================================================================

@@ -16,8 +16,9 @@ $ErrorActionPreference = "Stop"
 $AppName = "UncrumpledContextSwitcherDaemon"
 $DisplayName = "Uncrumpled Context Switcher"
 $Description = "A context management daemon that acts as a central hub for application state"
-$ExeName = "uncrumpled-context-switcher.exe"
-$LegacyExeName = "uncrumpled-context-switcher-daemon.exe"
+$DaemonExeName = "uncrumpled-context-switcher-daemon.exe"
+$UIExeName = "uncrumpled-context-switcher.exe"
+$CLIExeName = "uncrumpled-context-switcher-cli.exe"
 
 # Paths
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -62,9 +63,8 @@ function Test-Administrator {
 }
 
 function Test-ExistingInstall {
-    $exePath = Join-Path $InstallDir $ExeName
-    $legacyPath = Join-Path $InstallDir $LegacyExeName
-    return (Test-Path $exePath) -or (Test-Path $legacyPath)
+    $daemonPath = Join-Path $InstallDir $DaemonExeName
+    return Test-Path $daemonPath
 }
 
 function Ensure-Directory {
@@ -160,7 +160,6 @@ allowed_projects = [".*"]
 allowed_profiles = ["default", "work", "personal", "gaming"]
 allowed_environments = ["dev", "staging", "prod", "local"]
 
-[tags]
 [[tags.definitions]]
 name = "--work"
 description = "Work context"
@@ -171,7 +170,8 @@ description = "Personal context"
 
 [daemon]
 # Named pipe path (Windows uses named pipes instead of Unix sockets)
-pipe_path = "\\.\pipe\uncrumpled-context-switcher"
+# Note: Use single quotes for literal strings in TOML (no escape processing)
+pipe_path = '\\\\.\\pipe\\uncrumpled-context-switcher'
 heartbeat_interval_seconds = 30
 subscriber_timeout_seconds = 90
 max_log_entries = 1000
@@ -183,30 +183,38 @@ key = "$script:HotkeyKey"
 modifiers = "$script:HotkeyModifiers"
 "@
 
-    $defaultConfig | Out-File -FilePath $configPath -Encoding UTF8
+    # Write without BOM (UTF8NoBOM) - PowerShell 5.1 doesn't have UTF8NoBOM, so use .NET
+    [System.IO.File]::WriteAllText($configPath, $defaultConfig, [System.Text.UTF8Encoding]::new($false))
     Write-Host "Created default config: $configPath"
 }
 
-function Find-Binary {
-    # Check new location first
-    $binPath = Join-Path $ProjectRoot "bin\$ExeName"
-    if (Test-Path $binPath) {
-        return $binPath
+function Find-Binaries {
+    # Returns hashtable of found binaries
+    $binaries = @{
+        Daemon = $null
+        UI = $null
+        CLI = $null
     }
 
-    # Check old build location
-    $buildPath = Join-Path $ProjectRoot "build\$LegacyExeName"
-    if (Test-Path $buildPath) {
-        return $buildPath
+    # Check bin directory first (preferred)
+    $binDir = Join-Path $ProjectRoot "bin"
+    if (Test-Path $binDir) {
+        $daemonPath = Join-Path $binDir $DaemonExeName
+        $uiPath = Join-Path $binDir $UIExeName
+        $cliPath = Join-Path $binDir $CLIExeName
+
+        if (Test-Path $daemonPath) { $binaries.Daemon = $daemonPath }
+        if (Test-Path $uiPath) { $binaries.UI = $uiPath }
+        if (Test-Path $cliPath) { $binaries.CLI = $cliPath }
     }
 
-    # Check script directory
-    $localPath = Join-Path $ScriptDir $ExeName
-    if (Test-Path $localPath) {
-        return $localPath
+    # Fallback to script directory
+    if (-not $binaries.Daemon) {
+        $localPath = Join-Path $ScriptDir $DaemonExeName
+        if (Test-Path $localPath) { $binaries.Daemon = $localPath }
     }
 
-    return $null
+    return $binaries
 }
 
 function Build-Project {
@@ -236,15 +244,14 @@ function Build-Project {
     }
 }
 
-function Install-Binary {
-    $sourcePath = Find-Binary
+function Install-Binaries {
+    $binaries = Find-Binaries
 
-    if (-not $sourcePath) {
-        Write-Host "Error: Binary not found"
+    if (-not $binaries.Daemon) {
+        Write-Host "Error: Daemon binary not found"
         Write-Host ""
         Write-Host "Searched locations:"
-        Write-Host "  $ProjectRoot\bin\$ExeName"
-        Write-Host "  $ProjectRoot\build\$LegacyExeName"
+        Write-Host "  $ProjectRoot\bin\$DaemonExeName"
         Write-Host ""
         Write-Host "Please build the project first:"
         Write-Host "  cd $ProjectRoot"
@@ -255,19 +262,26 @@ function Install-Binary {
         exit 1
     }
 
-    $destPath = Join-Path $InstallDir $ExeName
-    Copy-Item -Path $sourcePath -Destination $destPath -Force
-    Write-Host "Installed binary: $destPath"
+    # Install daemon (required)
+    $daemonDest = Join-Path $InstallDir $DaemonExeName
+    Copy-Item -Path $binaries.Daemon -Destination $daemonDest -Force
+    Write-Host "Installed daemon: $daemonDest"
 
-    # Create symlink for backwards compatibility
-    $legacyDest = Join-Path $InstallDir $LegacyExeName
-    if (Test-Path $legacyDest) {
-        Remove-Item $legacyDest -Force
+    # Install UI (optional)
+    if ($binaries.UI) {
+        $uiDest = Join-Path $InstallDir $UIExeName
+        Copy-Item -Path $binaries.UI -Destination $uiDest -Force
+        Write-Host "Installed UI: $uiDest"
     }
-    # Create a copy instead of symlink (symlinks require admin on Windows)
-    Copy-Item -Path $destPath -Destination $legacyDest -Force
 
-    return $destPath
+    # Install CLI (optional)
+    if ($binaries.CLI) {
+        $cliDest = Join-Path $InstallDir $CLIExeName
+        Copy-Item -Path $binaries.CLI -Destination $cliDest -Force
+        Write-Host "Installed CLI: $cliDest"
+    }
+
+    return $daemonDest
 }
 
 function Stop-RunningProcess {
@@ -306,8 +320,8 @@ function Install-AsStartup {
         }
     }
 
-    # Install binary
-    $exePath = Install-Binary
+    # Install binaries
+    $daemonPath = Install-Binaries
 
     # Create config (skip in update mode)
     if (-not $UpdateOnly) {
@@ -321,7 +335,7 @@ function Install-AsStartup {
 
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = $exePath
+        $shortcut.TargetPath = $daemonPath
         $shortcut.WorkingDirectory = $InstallDir
         $shortcut.Description = $Description
         $shortcut.Save()
@@ -338,11 +352,11 @@ function Install-AsStartup {
             Write-Host "Binaries updated. Process was not restarted (dev mode)."
             Write-Host ""
             Write-Host "To manually start:"
-            Write-Host "  Start-Process `"$exePath`""
+            Write-Host "  Start-Process `"$daemonPath`""
         } else {
             if ($wasRunning) {
                 Write-Host "Restarting application..."
-                Start-Process -FilePath $exePath -WorkingDirectory $InstallDir
+                Start-Process -FilePath $daemonPath -WorkingDirectory $InstallDir
                 Write-Host "Binaries updated and application restarted."
             } else {
                 Write-Host "Binaries updated. Application was not running."
@@ -350,7 +364,7 @@ function Install-AsStartup {
         }
     } else {
         Write-Host "The daemon will start automatically on next login."
-        Write-Host "To start now, run: $exePath"
+        Write-Host "To start now, run: $daemonPath"
     }
 }
 
@@ -388,8 +402,8 @@ function Install-AsService {
         }
     }
 
-    # Install binary
-    $exePath = Install-Binary
+    # Install binaries
+    $daemonPath = Install-Binaries
 
     # Create config (skip in update mode)
     if (-not $UpdateOnly) {
@@ -405,7 +419,7 @@ function Install-AsService {
         }
 
         # Create the service
-        $binPath = "`"$exePath`" --foreground"
+        $binPath = "`"$daemonPath`" --foreground"
 
         New-Service -Name $AppName `
             -DisplayName $DisplayName `
@@ -476,15 +490,20 @@ function Uninstall {
     }
 
     # Remove binaries
-    $exePath = Join-Path $InstallDir $ExeName
-    $legacyPath = Join-Path $InstallDir $LegacyExeName
-    if (Test-Path $exePath) {
-        Remove-Item $exePath -Force
-        Write-Host "Removed binary: $exePath"
+    $daemonPath = Join-Path $InstallDir $DaemonExeName
+    $uiPath = Join-Path $InstallDir $UIExeName
+    $cliPath = Join-Path $InstallDir $CLIExeName
+    if (Test-Path $daemonPath) {
+        Remove-Item $daemonPath -Force
+        Write-Host "Removed binary: $daemonPath"
     }
-    if (Test-Path $legacyPath) {
-        Remove-Item $legacyPath -Force
-        Write-Host "Removed binary: $legacyPath"
+    if (Test-Path $uiPath) {
+        Remove-Item $uiPath -Force
+        Write-Host "Removed binary: $uiPath"
+    }
+    if (Test-Path $cliPath) {
+        Remove-Item $cliPath -Force
+        Write-Host "Removed binary: $cliPath"
     }
 
     Write-Host ""
