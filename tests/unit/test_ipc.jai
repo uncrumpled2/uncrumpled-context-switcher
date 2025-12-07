@@ -8,6 +8,15 @@
 
 #load "../../src/daemon/ipc.jai";
 
+// Helper to get platform-appropriate socket/pipe path
+get_test_ipc_path :: (name: string) -> string {
+    #if OS == .WINDOWS {
+        return tprint("\\\\.\\pipe\\%", name);
+    } else {
+        return tprint("/tmp/%.sock", name);
+    }
+}
+
 test_ipc_server_init :: () -> bool {
     state := init_test_state("test_ipc_server_init", verbose = false);
     defer cleanup_test_state(state);
@@ -19,7 +28,7 @@ test_ipc_server_init :: () -> bool {
         server: IPC_Server;
 
         // Test initialization
-        success := init_ipc_server(*server, "/tmp/test_uncrumpled_ipc.sock");
+        success := init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_ipc"));
         defer destroy_ipc_server(*server);
 
         assert_true(success, "server init should succeed");
@@ -42,13 +51,13 @@ test_ipc_server_double_init :: () -> bool {
     push_context ctx {
         server: IPC_Server;
 
-        success1 := init_ipc_server(*server, "/tmp/test_uncrumpled_ipc.sock");
+        success1 := init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_ipc"));
         defer destroy_ipc_server(*server);
 
         assert_true(success1, "first init should succeed");
 
         // Second init should fail
-        success2 := init_ipc_server(*server, "/tmp/test_uncrumpled_ipc2.sock");
+        success2 := init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_ipc2"));
         assert_false(success2, "second init should fail");
     }
 
@@ -64,7 +73,7 @@ test_ipc_server_start_stop :: () -> bool {
 
     push_context ctx {
         server: IPC_Server;
-        init_ipc_server(*server, "/tmp/test_uncrumpled_start_stop.sock");
+        init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_start_stop"));
         defer destroy_ipc_server(*server);
 
         // Start server
@@ -128,7 +137,7 @@ test_ipc_stats :: () -> bool {
 
     push_context ctx {
         server: IPC_Server;
-        init_ipc_server(*server, "/tmp/test_uncrumpled_stats.sock");
+        init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_stats"));
         defer destroy_ipc_server(*server);
 
         // Get initial stats
@@ -151,7 +160,7 @@ test_ipc_get_connection :: () -> bool {
 
     push_context ctx {
         server: IPC_Server;
-        init_ipc_server(*server, "/tmp/test_uncrumpled_get_conn.sock");
+        init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_get_conn"));
         defer destroy_ipc_server(*server);
 
         // Get non-existent connection
@@ -186,7 +195,7 @@ test_ipc_connection_count :: () -> bool {
 
     push_context ctx {
         server: IPC_Server;
-        init_ipc_server(*server, "/tmp/test_uncrumpled_count.sock");
+        init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_count"));
         defer destroy_ipc_server(*server);
 
         // Initial count
@@ -211,7 +220,7 @@ test_ipc_poll_not_running :: () -> bool {
 
     push_context ctx {
         server: IPC_Server;
-        init_ipc_server(*server, "/tmp/test_uncrumpled_poll.sock");
+        init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_poll"));
         defer destroy_ipc_server(*server);
 
         // Poll without starting should return -1
@@ -231,7 +240,7 @@ test_ipc_accept_not_running :: () -> bool {
 
     push_context ctx {
         server: IPC_Server;
-        init_ipc_server(*server, "/tmp/test_uncrumpled_accept.sock");
+        init_ipc_server(*server, get_test_ipc_path("test_uncrumpled_accept"));
         defer destroy_ipc_server(*server);
 
         // Accept without starting should return 0
@@ -257,7 +266,7 @@ test_ipc_client_init :: () -> bool {
         client: IPC_Client;
 
         // Test initialization
-        success := init_ipc_client(*client, "/tmp/test_client.sock");
+        success := init_ipc_client(*client, get_test_ipc_path("test_client"));
         defer destroy_ipc_client(*client);
 
         assert_true(success, "client init should succeed");
@@ -279,13 +288,13 @@ test_ipc_client_double_init :: () -> bool {
     push_context ctx {
         client: IPC_Client;
 
-        success1 := init_ipc_client(*client, "/tmp/test_client.sock");
+        success1 := init_ipc_client(*client, get_test_ipc_path("test_client"));
         defer destroy_ipc_client(*client);
 
         assert_true(success1, "first init should succeed");
 
         // Second init should fail
-        success2 := init_ipc_client(*client, "/tmp/test_client2.sock");
+        success2 := init_ipc_client(*client, get_test_ipc_path("test_client2"));
         assert_false(success2, "second init should fail");
     }
 
@@ -302,7 +311,7 @@ test_ipc_client_connect_no_server :: () -> bool {
     push_context ctx {
         client: IPC_Client;
 
-        init_ipc_client(*client, "/tmp/test_nonexistent.sock");
+        init_ipc_client(*client, get_test_ipc_path("test_nonexistent"));
         defer destroy_ipc_client(*client);
 
         // Connect should fail when no server
@@ -327,7 +336,7 @@ test_ipc_client_is_connected :: () -> bool {
         // Uninitialized client
         assert_false(client_is_connected(*client), "uninitialized client should not be connected");
 
-        init_ipc_client(*client, "/tmp/test_client.sock");
+        init_ipc_client(*client, get_test_ipc_path("test_client"));
         defer destroy_ipc_client(*client);
 
         // Initialized but disconnected
@@ -351,7 +360,7 @@ test_ipc_client_stats :: () -> bool {
     push_context ctx {
         client: IPC_Client;
 
-        init_ipc_client(*client, "/tmp/test_client.sock");
+        init_ipc_client(*client, get_test_ipc_path("test_client"));
         defer destroy_ipc_client(*client);
 
         // Check initial stats
@@ -383,7 +392,7 @@ test_ipc_client_server_roundtrip :: () -> bool {
     ctx.test_state = state;
 
     push_context ctx {
-        socket_path :: "/tmp/test_roundtrip.sock";
+        socket_path := get_test_ipc_path("test_roundtrip");
 
         // Create and start server
         server: IPC_Server;
@@ -492,7 +501,7 @@ test_ipc_multiple_clients :: () -> bool {
     ctx.test_state = state;
 
     push_context ctx {
-        socket_path :: "/tmp/test_multi_clients.sock";
+        socket_path := get_test_ipc_path("test_multi_clients");
 
         // Create and start server
         server: IPC_Server;

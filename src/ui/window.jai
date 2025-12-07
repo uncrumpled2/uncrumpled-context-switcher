@@ -23,7 +23,7 @@ create_app_window :: () -> *Window_State {
     // NOTE: Window positioning doesn't work reliably on WSLg due to Wayland/Weston
     // compositor limitations. SDL_WINDOWPOS_CENTERED is a hint that may be ignored.
     // This works correctly on native Linux with X11 window managers.
-    flags : SDL_WindowFlags = SDL_WINDOW_SHOWN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP;
+    flags : SDL_WindowFlags = SDL_WINDOW_HIDDEN | SDL_WINDOW_BORDERLESS | SDL_WINDOW_ALWAYS_ON_TOP;
 
     state.sdl_window = SDL_CreateWindow("Uncrumpled Context Switcher",
                              SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -36,7 +36,7 @@ create_app_window :: () -> *Window_State {
         return null;
     }
 
-    state.is_visible = true;
+    state.is_visible = false;
     return state;
 }
 

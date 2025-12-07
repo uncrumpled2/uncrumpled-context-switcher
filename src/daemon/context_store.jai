@@ -6,12 +6,453 @@
 // - Thread-safe read/write access via mutex
 // - Version tracking (increment on each change)
 // - State persistence (save/load from disk)
+// - Multi-context support with named contexts and argument schemas
+// - Active context tracking with parsed arguments
 
 #import "Basic";
 #import "String";
 #import "File";
 #import "Hash_Table";
 #import "Thread";
+
+// ============================================================================
+// Context Definition Types (Schema from config)
+// ============================================================================
+
+// Argument type for context definitions
+Arg_Type :: enum {
+    STRING;     // Any string value
+    FLAG;       // Boolean flag (no value)
+    ENUM;       // One of a set of allowed values
+    INT;        // Integer value
+    FLOAT;      // Floating point value
+}
+
+// Definition of an argument that a context can accept
+Arg_Definition :: struct {
+    name: string;           // Long name (e.g., "mode")
+    short: string;          // Short form (e.g., "m") - optional
+    arg_type: Arg_Type;     // Type of argument
+    values: [..] string;    // For ENUM: allowed values
+    default_value: string;  // Default value (optional)
+    required: bool;         // Whether this argument is required
+    description: string;    // Human-readable description
+}
+
+// Definition of a named context
+Context_Definition :: struct {
+    name: string;                   // Context name (e.g., "work", "gaming")
+    description: string;            // Human-readable description
+    args: [..] Arg_Definition;      // Argument schema
+}
+
+// Active context state (runtime)
+Active_Context :: struct {
+    name: string;                       // Context name
+    args: Table(string, string);        // Parsed argument values (key -> value)
+    flags: Table(string, bool);         // Boolean flags that are set
+    raw_input: string;                  // Original input string
+    switched_at: Apollo_Time;           // When this context was activated
+}
+
+// Context Registry - manages multiple named contexts
+Context_Registry :: struct {
+    definitions: Table(string, Context_Definition);  // Context schemas
+    active: Active_Context;                          // Currently active context
+    history: [..] string;                            // Recent context inputs (for UI)
+    max_history: s32;                                // Max history entries
+    mutex: Mutex;
+    initialized: bool;
+    auto_create: bool;                               // Auto-create undefined contexts
+}
+
+// ============================================================================
+// Context Registry Functions
+// ============================================================================
+
+// Initialize the context registry
+init_context_registry :: (registry: *Context_Registry, auto_create := false, max_history: s32 = 50) {
+    init(*registry.mutex);
+    registry.initialized = true;
+    registry.auto_create = auto_create;
+    registry.max_history = max_history;
+
+    // Initialize active context to empty
+    registry.active.name = copy_string("");
+    registry.active.raw_input = copy_string("");
+    registry.active.switched_at = current_time_consensus();
+}
+
+// Cleanup the context registry
+destroy_context_registry :: (registry: *Context_Registry) {
+    if !registry.initialized return;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    // Free definitions
+    for registry.definitions {
+        free_context_definition(*it);
+        free(it_index);
+    }
+    deinit(*registry.definitions);
+
+    // Free active context
+    free_active_context(*registry.active);
+
+    // Free history
+    for registry.history free(it);
+    array_free(registry.history);
+
+    destroy(*registry.mutex);
+    registry.initialized = false;
+}
+
+// Add a context definition
+add_context_definition :: (registry: *Context_Registry, def: *Context_Definition) -> bool {
+    if !registry.initialized return false;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    // Check if already exists
+    found, _ := table_find(*registry.definitions, def.name);
+    if found return false;
+
+    // Copy and store
+    copied := copy_context_definition(def);
+    table_set(*registry.definitions, copy_string(def.name), copied);
+
+    return true;
+}
+
+// Remove a context definition
+remove_context_definition :: (registry: *Context_Registry, name: string) -> bool {
+    if !registry.initialized return false;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    ptr := table_find_pointer(*registry.definitions, name);
+    if ptr == null return false;
+
+    free_context_definition(ptr);
+    table_remove(*registry.definitions, name);
+
+    return true;
+}
+
+// Get a context definition (returns copy)
+get_context_definition :: (registry: *Context_Registry, name: string) -> Context_Definition, bool {
+    if !registry.initialized return .{}, false;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    found, def := table_find(*registry.definitions, name);
+    if !found return .{}, false;
+
+    return copy_context_definition(*def), true;
+}
+
+// Check if a context is defined
+has_context_definition :: (registry: *Context_Registry, name: string) -> bool {
+    if !registry.initialized return false;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    found, _ := table_find(*registry.definitions, name);
+    return found;
+}
+
+// List all context names
+list_context_names :: (registry: *Context_Registry) -> [..] string {
+    result: [..] string;
+    if !registry.initialized return result;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    for registry.definitions {
+        array_add(*result, copy_string(it_index));
+    }
+
+    return result;
+}
+
+// List all context definitions (returns copies)
+list_context_definitions :: (registry: *Context_Registry) -> [..] Context_Definition {
+    result: [..] Context_Definition;
+    if !registry.initialized return result;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    for registry.definitions {
+        array_add(*result, copy_context_definition(*it));
+    }
+
+    return result;
+}
+
+// Get the active context (returns copy)
+get_active_context :: (registry: *Context_Registry) -> Active_Context, bool {
+    if !registry.initialized return .{}, false;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    if registry.active.name.count == 0 {
+        return .{}, false;
+    }
+
+    return copy_active_context(*registry.active), true;
+}
+
+// Switch to a context (validates against schema if defined)
+// Returns: success, error_message
+switch_context_by_input :: (registry: *Context_Registry, name: string, args: *Table(string, string), flags: *Table(string, bool), raw_input: string) -> bool, string {
+    if !registry.initialized return false, "Registry not initialized";
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    // Check if context is defined
+    found, def := table_find(*registry.definitions, name);
+
+    if !found {
+        if !registry.auto_create {
+            return false, tprint("Context '%' is not defined", name);
+        }
+        // Auto-create mode: allow undefined contexts
+    } else {
+        // Validate arguments against schema
+        valid, err := validate_args_against_schema(*def, args, flags);
+        if !valid {
+            return false, err;
+        }
+    }
+
+    // Free old active context
+    free_active_context(*registry.active);
+
+    // Set new active context
+    registry.active.name = copy_string(name);
+    registry.active.raw_input = copy_string(raw_input);
+    registry.active.switched_at = current_time_consensus();
+
+    // Copy args
+    for <<args {
+        table_set(*registry.active.args, copy_string(it_index), copy_string(it));
+    }
+
+    // Copy flags
+    for <<flags {
+        table_set(*registry.active.flags, copy_string(it_index), it);
+    }
+
+    // Add to history
+    add_to_history_locked(registry, raw_input);
+
+    return true, "";
+}
+
+// Get recent history entries
+get_history :: (registry: *Context_Registry) -> [..] string {
+    result: [..] string;
+    if !registry.initialized return result;
+
+    lock(*registry.mutex);
+    defer unlock(*registry.mutex);
+
+    for registry.history {
+        array_add(*result, copy_string(it));
+    }
+
+    return result;
+}
+
+// ============================================================================
+// Validation
+// ============================================================================
+
+// Validate parsed arguments against a context schema
+validate_args_against_schema :: (def: *Context_Definition, args: *Table(string, string), flags: *Table(string, bool)) -> bool, string {
+    // Check required arguments
+    for def.args {
+        if it.required {
+            if it.arg_type == .FLAG {
+                // Required flag must be present
+                found, _ := table_find(flags, it.name);
+                if !found {
+                    // Also check short form
+                    if it.short.count > 0 {
+                        found, _ = table_find(flags, it.short);
+                    }
+                    if !found {
+                        return false, tprint("Required flag '--%' is missing", it.name);
+                    }
+                }
+            } else {
+                // Required option must be present
+                found, _ := table_find(args, it.name);
+                if !found {
+                    // Also check short form
+                    if it.short.count > 0 {
+                        found, _ = table_find(args, it.short);
+                    }
+                    if !found {
+                        return false, tprint("Required argument '--%' is missing", it.name);
+                    }
+                }
+            }
+        }
+    }
+
+    // Validate enum values
+    for def.args {
+        if it.arg_type == .ENUM && it.values.count > 0 {
+            found, val := table_find(args, it.name);
+            if !found && it.short.count > 0 {
+                found, val = table_find(args, it.short);
+            }
+
+            if found {
+                // Check if value is in allowed list
+                valid := false;
+                for it.values {
+                    if it == val {
+                        valid = true;
+                        break;
+                    }
+                }
+                if !valid {
+                    return false, tprint("Invalid value '%' for --%s. Allowed: %", val, it.name, it.values);
+                }
+            }
+        }
+    }
+
+    return true, "";
+}
+
+// ============================================================================
+// Internal Helpers
+// ============================================================================
+
+// Add to history (must hold mutex)
+add_to_history_locked :: (registry: *Context_Registry, input: string) {
+    // Remove if already in history (move to front)
+    for registry.history {
+        if it == input {
+            free(it);
+            remove it;
+            break;
+        }
+    }
+
+    // Add to front
+    array_insert_at(*registry.history, copy_string(input), 0);
+
+    // Trim if over max
+    while registry.history.count > registry.max_history {
+        last := pop(*registry.history);
+        free(last);
+    }
+}
+
+// Copy a context definition
+copy_context_definition :: (src: *Context_Definition) -> Context_Definition {
+    dst: Context_Definition;
+    dst.name = copy_string(src.name);
+    dst.description = copy_string(src.description);
+
+    for src.args {
+        array_add(*dst.args, copy_arg_definition(*it));
+    }
+
+    return dst;
+}
+
+// Free a context definition
+free_context_definition :: (def: *Context_Definition) {
+    free(def.name);
+    free(def.description);
+    for *def.args {
+        free_arg_definition(it);
+    }
+    array_free(def.args);
+}
+
+// Copy an arg definition
+copy_arg_definition :: (src: *Arg_Definition) -> Arg_Definition {
+    dst: Arg_Definition;
+    dst.name = copy_string(src.name);
+    dst.short = copy_string(src.short);
+    dst.arg_type = src.arg_type;
+    dst.default_value = copy_string(src.default_value);
+    dst.required = src.required;
+    dst.description = copy_string(src.description);
+
+    for src.values {
+        array_add(*dst.values, copy_string(it));
+    }
+
+    return dst;
+}
+
+// Free an arg definition
+free_arg_definition :: (arg: *Arg_Definition) {
+    free(arg.name);
+    free(arg.short);
+    free(arg.default_value);
+    free(arg.description);
+    for arg.values free(it);
+    array_free(arg.values);
+}
+
+// Copy active context
+copy_active_context :: (src: *Active_Context) -> Active_Context {
+    dst: Active_Context;
+    dst.name = copy_string(src.name);
+    dst.raw_input = copy_string(src.raw_input);
+    dst.switched_at = src.switched_at;
+
+    for src.args {
+        table_set(*dst.args, copy_string(it_index), copy_string(it));
+    }
+    for src.flags {
+        table_set(*dst.flags, copy_string(it_index), it);
+    }
+
+    return dst;
+}
+
+// Free active context data
+free_active_context :: (ctx: *Active_Context) {
+    free(ctx.name);
+    free(ctx.raw_input);
+
+    for ctx.args {
+        free(it);
+        free(it_index);
+    }
+    deinit(*ctx.args);
+
+    for ctx.flags {
+        free(it_index);
+    }
+    deinit(*ctx.flags);
+
+    // Reset to empty state
+    ctx.name = copy_string("");
+    ctx.raw_input = copy_string("");
+}
+
+// ============================================================================
+// Original Context Store Types (kept for backward compatibility)
+// ============================================================================
 
 // Core Context structure
 Context :: struct {

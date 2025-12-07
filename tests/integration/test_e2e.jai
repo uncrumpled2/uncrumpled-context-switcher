@@ -12,7 +12,9 @@
 #import "Basic";
 #import "String";
 #import "File";
-#import "POSIX";
+#if OS == .LINUX || OS == .MACOS {
+    #import "POSIX";
+}
 #import "Thread";
 #import "Hash_Table";
 #import "Random";
@@ -80,9 +82,11 @@ connect_e2e_client :: (client: *E2E_Test_Client, socket_path: string) -> bool {
 }
 
 disconnect_e2e_client :: (client: *E2E_Test_Client) {
-    if client.e2e_socket >= 0 {
-        close(client.e2e_socket);
-        client.e2e_socket = -1;
+    #if OS == .LINUX || OS == .MACOS {
+        if client.e2e_socket >= 0 {
+            close(client.e2e_socket);
+            client.e2e_socket = -1;
+        }
     }
     client.connected = false;
 }
@@ -92,66 +96,69 @@ disconnect_e2e_client :: (client: *E2E_Test_Client) {
 e2e_send_request :: (client: *E2E_Test_Client, method: string, params := "", server: *Daemon_Server = null) -> string, bool {
     if !client.connected return "", false;
 
-    // POSIX already imported at file level
-
-    // Build JSON-RPC request
-    request: string;
-    if params.count > 0 {
-        request = tprint("{\"jsonrpc\":\"2.0\",\"method\":\"%\",\"params\":%,\"id\":1}\n", method, params);
-    } else {
-        request = tprint("{\"jsonrpc\":\"2.0\",\"method\":\"%\",\"id\":1}\n", method);
-    }
-
-    // Send request
-    bytes_sent := write(client.e2e_socket, request.data, cast(u64) request.count);
-    if bytes_sent < 0 {
-        return "", false;
-    }
-
-    // Run server iterations to process the request
-    if server {
-        run_server_iteration(server, 50);
-        run_server_iteration(server, 50);
-    } else {
-        // Fallback: sleep and hope server is running in another thread
-        sleep_ms(50);
-    }
-
-    // Set socket to non-blocking for read
-    flags := fcntl(client.e2e_socket, F_GETFL, 0);
-    fcntl(client.e2e_socket, F_SETFL, flags | O_NONBLOCK);
-
-    // Try to receive response with retries
-    bytes_received: s64 = -1;
-    for retry: 0..9 {  // Up to 10 retries
-        bytes_received = read(client.e2e_socket, client.recv_buffer.data, 65535);
-        if bytes_received > 0 break;
-
-        // Run more server iterations if available
-        if server {
-            run_server_iteration(server, 20);
+    #if OS == .LINUX || OS == .MACOS {
+        // Build JSON-RPC request
+        request: string;
+        if params.count > 0 {
+            request = tprint("{\"jsonrpc\":\"2.0\",\"method\":\"%\",\"params\":%,\"id\":1}\n", method, params);
+        } else {
+            request = tprint("{\"jsonrpc\":\"2.0\",\"method\":\"%\",\"id\":1}\n", method);
         }
-        sleep_ms(10);
-    }
 
-    // Restore blocking mode
-    fcntl(client.e2e_socket, F_SETFL, flags);
+        // Send request
+        bytes_sent := write(client.e2e_socket, request.data, cast(u64) request.count);
+        if bytes_sent < 0 {
+            return "", false;
+        }
 
-    if bytes_received <= 0 {
+        // Run server iterations to process the request
+        if server {
+            run_server_iteration(server, 50);
+            run_server_iteration(server, 50);
+        } else {
+            // Fallback: sleep and hope server is running in another thread
+            sleep_ms(50);
+        }
+
+        // Set socket to non-blocking for read
+        flags := fcntl(client.e2e_socket, F_GETFL, 0);
+        fcntl(client.e2e_socket, F_SETFL, flags | O_NONBLOCK);
+
+        // Try to receive response with retries
+        bytes_received: s64 = -1;
+        for retry: 0..9 {  // Up to 10 retries
+            bytes_received = read(client.e2e_socket, client.recv_buffer.data, 65535);
+            if bytes_received > 0 break;
+
+            // Run more server iterations if available
+            if server {
+                run_server_iteration(server, 20);
+            }
+            sleep_ms(10);
+        }
+
+        // Restore blocking mode
+        fcntl(client.e2e_socket, F_SETFL, flags);
+
+        if bytes_received <= 0 {
+            return "", false;
+        }
+
+        // Return response (strip trailing newline)
+        response_str: string;
+        response_str.data = client.recv_buffer.data;
+        response_str.count = bytes_received;
+
+        // Trim trailing newlines
+        while response_str.count > 0 && (response_str[response_str.count-1] == #char "\n" || response_str[response_str.count-1] == #char "\r") {
+            response_str.count -= 1;
+        }
+
+        return copy_string(response_str), true;
+    } else {
+        // Windows: e2e tests not yet supported
         return "", false;
     }
-
-    // Return response (strip trailing newline)
-    response_str: string;
-    response_str.data = client.recv_buffer.data;
-    response_str.count = bytes_received;
-
-    // Trim trailing newlines
-    while response_str.count > 0 && (response_str[response_str.count-1] == #char "\n" || response_str[response_str.count-1] == #char "\r") {
-        response_str.count -= 1;
-    }
-
-    return copy_string(response_str), true;
 }
 
 // Helper to extract JSON field value (simple parser for test assertions)

@@ -3,10 +3,15 @@
 // Tests the platform abstraction layer (Linux/macOS path helpers, etc.)
 // On Linux, tests Linux-specific functionality.
 // On macOS, tests macOS-specific functionality.
+// On Windows, tests Windows-specific functionality.
 
 #import "Basic";
 #import "String";
-#import "POSIX";
+
+// POSIX is only available on Linux/macOS
+#if OS == .LINUX || OS == .MACOS {
+    #import "POSIX";
+}
 
 // Load platform-specific code
 #load "../../src/daemon/platform/module.jai";

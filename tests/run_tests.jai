@@ -14,6 +14,7 @@
 
 // Unit tests
 #load "unit/test_daemon_args.jai";
+#load "unit/test_args_parser.jai";
 #load "unit/test_context_store.jai";
 #load "unit/test_ipc.jai";
 #load "unit/test_jsonrpc.jai";
@@ -32,6 +33,7 @@
 #load "unit/test_platform.jai";
 #load "unit/test_hotkey.jai";
 #load "unit/test_history.jai";
+#load "unit/test_context_registry.jai";
 
 // Integration / E2E tests
 #load "integration/test_e2e.jai";
@@ -445,6 +447,7 @@ main :: () {
 
     // Load and register unit tests
     register_daemon_args_tests();
+    register_args_parser_tests();
     register_context_store_tests();
     register_ipc_tests();
     register_jsonrpc_tests(register_test);
@@ -463,6 +466,7 @@ main :: () {
     register_platform_tests();
     register_hotkey_tests();
     register_history_tests();
+    register_context_registry_tests();
 
     // Register e2e/integration tests
     register_e2e_tests(register_test);

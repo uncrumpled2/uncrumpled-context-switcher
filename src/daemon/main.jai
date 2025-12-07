@@ -38,6 +38,7 @@
 }
 
 // Load daemon modules (they import their own dependencies like jason, jai-toml-c)
+#load "args_parser.jai";
 #load "context_store.jai";
 #load "ipc.jai";
 #load "rpc/module.jai";

@@ -822,7 +822,9 @@ ipc_min :: inline (a: $T, b: T) -> T {
 
 #if OS == .WINDOWS {
 
-// Windows type aliases (scoped to this block)
+#scope_file
+
+// Windows type aliases (scoped to this file to avoid conflicts with Windows module)
 HANDLE :: *void;
 DWORD :: u32;
 BOOL :: s32;
@@ -909,6 +911,8 @@ SetNamedPipeHandleState :: (
     lpCollectDataTimeout: *DWORD
 ) -> BOOL #foreign kernel32;
 
+#scope_export  // Re-export the IPC functions
+
 // Start Windows named pipe server
 start_windows_server :: (server: *IPC_Server) -> bool {
     // Create the named pipe
@@ -916,7 +920,7 @@ start_windows_server :: (server: *IPC_Server) -> bool {
     pipe_name := ipc_to_c_string(server.socket_path);
     defer free(pipe_name);
 
-    server.server_fd = cast(s32) cast(u64) CreateNamedPipeA(
+    pipe_handle := CreateNamedPipeA(
         pipe_name,
         PIPE_ACCESS_DUPLEX,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
@@ -927,10 +931,12 @@ start_windows_server :: (server: *IPC_Server) -> bool {
         null
     );
 
-    if cast(HANDLE) cast(u64) server.server_fd == INVALID_HANDLE_VALUE {
+    if pipe_handle == INVALID_HANDLE_VALUE {
         server.server_fd = -1;
         return false;
     }
+
+    server.server_fd = cast(s32) cast(u64) pipe_handle;
 
     server.running = true;
     return true;
@@ -1016,7 +1022,7 @@ accept_windows_connections :: (server: *IPC_Server) -> s32 {
             accepted += 1;
 
             // Create a new pipe for the next client
-            server.server_fd = cast(s32) cast(u64) CreateNamedPipeA(
+            new_pipe := CreateNamedPipeA(
                 pipe_name,
                 PIPE_ACCESS_DUPLEX,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
@@ -1027,8 +1033,10 @@ accept_windows_connections :: (server: *IPC_Server) -> s32 {
                 null
             );
 
-            if cast(HANDLE) cast(u64) server.server_fd == INVALID_HANDLE_VALUE {
+            if new_pipe == INVALID_HANDLE_VALUE {
                 server.server_fd = -1;
+            } else {
+                server.server_fd = cast(s32) cast(u64) new_pipe;
             }
         }
     }

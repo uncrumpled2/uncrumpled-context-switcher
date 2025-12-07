@@ -9,13 +9,18 @@
 // - context.setParam  - Set a user parameter
 // - context.getParam  - Get a user parameter
 // - context.removeParam - Remove a user parameter
+// - context.list    - List all contexts with schemas (NEW)
+// - context.switch  - Switch to a context by input string (NEW)
+// - context.create  - Create a new context definition (NEW)
+// - context.delete  - Delete a context definition (NEW)
 //
 // All handlers take a JSON-RPC request and return a JSON response string.
 
 // Note: This file expects the following to already be imported/loaded:
 // - Basic, String, Hash_Table
 // - jason module (as jason::)
-// - context_store.jai (for Context, Context_Store, etc.)
+// - context_store.jai (for Context, Context_Store, Context_Registry, etc.)
+// - args_parser.jai (for parse_context_input, Parsed_Input, etc.)
 // - rpc/protocol.jai (for JSONRPC_*, parse_*, create_*, etc.)
 
 // ============================================================================
@@ -442,6 +447,39 @@ is_context_method :: (method: string) -> bool {
     return begins_with(method, "context.");
 }
 
+// Route a context.* method to multi-context registry handlers
+// Use this for context.list, context.switch, context.create, context.delete
+route_context_registry_method :: (registry: *Context_Registry, request: *JSONRPC_Request) -> API_Result {
+    result: API_Result;
+
+    if request.method == {
+        case "context.list";
+            return handle_context_list(registry, request);
+        case "context.switch";
+            return handle_context_switch(registry, request);
+        case "context.create";
+            return handle_context_create(registry, request);
+        case "context.delete";
+            return handle_context_delete(registry, request);
+        case;
+            result.success = false;
+            result.response = create_error_response(
+                request.id,
+                JSONRPC_METHOD_NOT_FOUND,
+                tprint("Unknown registry method: %", request.method)
+            );
+            return result;
+    }
+}
+
+// Check if a method is a context registry method (uses Context_Registry instead of Context_Store)
+is_context_registry_method :: (method: string) -> bool {
+    return method == "context.list" ||
+           method == "context.switch" ||
+           method == "context.create" ||
+           method == "context.delete";
+}
+
 // ============================================================================
 // JSON Conversion Helpers
 // ============================================================================
@@ -626,4 +664,343 @@ build_param_response :: (version: u64) -> jason.JSON_Value {
     table_set(result.object, copy_string("version"), json_number(cast(float64) version));
 
     return result;
+}
+
+// ============================================================================
+// Multi-Context API Handlers (New)
+// ============================================================================
+
+// Handle context.list request
+// Returns all defined contexts with their argument schemas
+handle_context_list :: (registry: *Context_Registry, request: *JSONRPC_Request) -> API_Result {
+    result: API_Result;
+
+    // Get all context definitions
+    definitions := list_context_definitions(registry);
+    defer {
+        for *definitions free_context_definition(it);
+        array_free(definitions);
+    }
+
+    // Get history
+    history := get_history(registry);
+    defer {
+        for history free(it);
+        array_free(history);
+    }
+
+    // Build response object
+    response_obj := json_object();
+    defer jason.json_free(response_obj);
+
+    // Add contexts array
+    contexts_array: jason.JSON_Value;
+    contexts_array.type = .ARRAY;
+    contexts_dyn: [..] jason.JSON_Value;
+
+    for *definitions {
+        ctx_json := context_definition_to_json(it);
+        array_add(*contexts_dyn, ctx_json);
+    }
+    contexts_array.array = contexts_dyn;
+    table_set(response_obj.object, copy_string("contexts"), contexts_array);
+
+    // Add history array
+    history_array: jason.JSON_Value;
+    history_array.type = .ARRAY;
+    history_dyn: [..] jason.JSON_Value;
+
+    for history {
+        array_add(*history_dyn, jason.json_value(copy_string(it)));
+    }
+    history_array.array = history_dyn;
+    table_set(response_obj.object, copy_string("history"), history_array);
+
+    // Add active context info
+    active, has_active := get_active_context(registry);
+    if has_active {
+        defer free_active_context(*active);
+        active_json := json_object();
+        table_set(active_json.object, copy_string("name"), jason.json_value(copy_string(active.name)));
+        table_set(active_json.object, copy_string("raw_input"), jason.json_value(copy_string(active.raw_input)));
+        table_set(response_obj.object, copy_string("active"), active_json);
+    } else {
+        null_val: jason.JSON_Value;
+        null_val.type = .NULL;
+        table_set(response_obj.object, copy_string("active"), null_val);
+    }
+
+    result.success = true;
+    result.response = create_response(request.id, response_obj);
+
+    return result;
+}
+
+// Handle context.switch request
+// Params: { input: "work --mode=programming" }
+handle_context_switch :: (registry: *Context_Registry, request: *JSONRPC_Request) -> API_Result {
+    result: API_Result;
+
+    // Validate params
+    if request.params.type != .OBJECT {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            JSONRPC_INVALID_PARAMS,
+            "context.switch requires an object parameter"
+        );
+        return result;
+    }
+
+    // Get input string
+    found_input, input_val := table_find(request.params.object, "input");
+    if !found_input || input_val.type != .STRING {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            JSONRPC_INVALID_PARAMS,
+            "context.switch requires an 'input' string parameter"
+        );
+        return result;
+    }
+
+    input := input_val.str;
+
+    // Parse the input
+    parsed := parse_context_input(input);
+    defer free_parsed_input(*parsed);
+
+    if !parsed.success {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            JSONRPC_INVALID_PARAMS,
+            tprint("Failed to parse input: %", parsed.error)
+        );
+        return result;
+    }
+
+    // Build args and flags tables from parsed input
+    args: Table(string, string);
+    flags: Table(string, bool);
+    defer {
+        for args { free(it); free(it_index); }
+        deinit(*args);
+        for flags { free(it_index); }
+        deinit(*flags);
+    }
+
+    for parsed.args {
+        if it.is_flag {
+            table_set(*flags, copy_string(it_index), true);
+        } else {
+            table_set(*args, copy_string(it_index), copy_string(it.value));
+        }
+    }
+
+    // Switch context
+    success, err := switch_context_by_input(registry, parsed.name, *args, *flags, input);
+
+    if !success {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            -1001,  // Context not found / validation error
+            err
+        );
+        return result;
+    }
+
+    // Build success response
+    response_obj := json_object();
+    defer jason.json_free(response_obj);
+
+    table_set(response_obj.object, copy_string("success"), json_bool(true));
+    table_set(response_obj.object, copy_string("name"), jason.json_value(copy_string(parsed.name)));
+    table_set(response_obj.object, copy_string("input"), jason.json_value(copy_string(input)));
+
+    result.success = true;
+    result.response = create_response(request.id, response_obj);
+
+    return result;
+}
+
+// Handle context.create request
+// Params: { name: "work", description?: "...", args?: [...] }
+handle_context_create :: (registry: *Context_Registry, request: *JSONRPC_Request) -> API_Result {
+    result: API_Result;
+
+    // Validate params
+    if request.params.type != .OBJECT {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            JSONRPC_INVALID_PARAMS,
+            "context.create requires an object parameter"
+        );
+        return result;
+    }
+
+    // Get name
+    found_name, name_val := table_find(request.params.object, "name");
+    if !found_name || name_val.type != .STRING {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            JSONRPC_INVALID_PARAMS,
+            "context.create requires a 'name' string parameter"
+        );
+        return result;
+    }
+
+    // Build context definition
+    def: Context_Definition;
+    def.name = copy_string(name_val.str);
+
+    // Parse optional description
+    found_desc, desc_val := table_find(request.params.object, "description");
+    if found_desc && desc_val.type == .STRING {
+        def.description = copy_string(desc_val.str);
+    }
+
+    // TODO: Parse args array if provided
+
+    // Add to registry
+    success := add_context_definition(registry, *def);
+    free_context_definition(*def);
+
+    if !success {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            -1002,  // Context already exists
+            tprint("Context '%' already exists", name_val.str)
+        );
+        return result;
+    }
+
+    // Build success response
+    response_obj := json_object();
+    defer jason.json_free(response_obj);
+
+    table_set(response_obj.object, copy_string("success"), json_bool(true));
+    table_set(response_obj.object, copy_string("name"), jason.json_value(copy_string(name_val.str)));
+
+    result.success = true;
+    result.response = create_response(request.id, response_obj);
+
+    return result;
+}
+
+// Handle context.delete request
+// Params: { name: "work" }
+handle_context_delete :: (registry: *Context_Registry, request: *JSONRPC_Request) -> API_Result {
+    result: API_Result;
+
+    // Validate params
+    if request.params.type != .OBJECT {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            JSONRPC_INVALID_PARAMS,
+            "context.delete requires an object parameter"
+        );
+        return result;
+    }
+
+    // Get name
+    found_name, name_val := table_find(request.params.object, "name");
+    if !found_name || name_val.type != .STRING {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            JSONRPC_INVALID_PARAMS,
+            "context.delete requires a 'name' string parameter"
+        );
+        return result;
+    }
+
+    // Remove from registry
+    success := remove_context_definition(registry, name_val.str);
+
+    if !success {
+        result.success = false;
+        result.response = create_error_response(
+            request.id,
+            -1001,  // Context not found
+            tprint("Context '%' not found", name_val.str)
+        );
+        return result;
+    }
+
+    // Build success response
+    response_obj := json_object();
+    defer jason.json_free(response_obj);
+
+    table_set(response_obj.object, copy_string("success"), json_bool(true));
+    table_set(response_obj.object, copy_string("name"), jason.json_value(copy_string(name_val.str)));
+
+    result.success = true;
+    result.response = create_response(request.id, response_obj);
+
+    return result;
+}
+
+// Convert Context_Definition to JSON
+context_definition_to_json :: (def: *Context_Definition) -> jason.JSON_Value {
+    result := json_object();
+
+    table_set(result.object, copy_string("name"), jason.json_value(copy_string(def.name)));
+    table_set(result.object, copy_string("description"), jason.json_value(copy_string(def.description)));
+
+    // Add args array
+    args_array: jason.JSON_Value;
+    args_array.type = .ARRAY;
+    args_dyn: [..] jason.JSON_Value;
+
+    for *def.args {
+        arg_json := arg_definition_to_json(it);
+        array_add(*args_dyn, arg_json);
+    }
+    args_array.array = args_dyn;
+    table_set(result.object, copy_string("args"), args_array);
+
+    return result;
+}
+
+// Convert Arg_Definition to JSON
+arg_definition_to_json :: (arg: *Arg_Definition) -> jason.JSON_Value {
+    result := json_object();
+
+    table_set(result.object, copy_string("name"), jason.json_value(copy_string(arg.name)));
+    table_set(result.object, copy_string("short"), jason.json_value(copy_string(arg.short)));
+    table_set(result.object, copy_string("type"), jason.json_value(copy_string(arg_type_to_string(arg.arg_type))));
+    table_set(result.object, copy_string("default"), jason.json_value(copy_string(arg.default_value)));
+    table_set(result.object, copy_string("required"), json_bool(arg.required));
+    table_set(result.object, copy_string("description"), jason.json_value(copy_string(arg.description)));
+
+    // Add values array for enums
+    values_array: jason.JSON_Value;
+    values_array.type = .ARRAY;
+    values_dyn: [..] jason.JSON_Value;
+
+    for arg.values {
+        array_add(*values_dyn, jason.json_value(copy_string(it)));
+    }
+    values_array.array = values_dyn;
+    table_set(result.object, copy_string("values"), values_array);
+
+    return result;
+}
+
+// Convert Arg_Type to string
+arg_type_to_string :: (t: Arg_Type) -> string {
+    if t == {
+        case .STRING; return "string";
+        case .FLAG;   return "flag";
+        case .ENUM;   return "enum";
+        case .INT;    return "int";
+        case .FLOAT;  return "float";
+    }
+    return "string";
 }

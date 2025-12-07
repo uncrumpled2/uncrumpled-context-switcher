@@ -29,11 +29,17 @@ User_Config :: struct {
     // Parameter definitions
     params: Params_Config;
 
+    // Named context definitions with argument schemas
+    contexts: Contexts_Config;
+
     // Daemon settings
     daemon: Daemon_Settings;
 
     // Hotkey settings
     hotkey: Hotkey_Config;
+
+    // UI settings
+    ui: UI_Config;
 
     // Parsing state
     has_error: bool;
@@ -100,6 +106,35 @@ Hotkey_Config :: struct {
     modifiers: string;  // Modifier string (e.g., "Ctrl+Alt", "Ctrl+Shift")
 }
 
+// Named contexts configuration section
+Contexts_Config :: struct {
+    auto_create: bool;                        // Auto-create undefined contexts
+    definitions: [..] Config_Context_Definition;  // Context schemas
+}
+
+// A context definition from config (maps to Context_Definition in context_store)
+Config_Context_Definition :: struct {
+    name:        string;                          // Context name (e.g., "work", "gaming")
+    description: string;                          // Human-readable description
+    args:        [..] Config_Arg_Definition;      // Argument schema
+}
+
+// Argument definition from config (maps to Arg_Definition in context_store)
+Config_Arg_Definition :: struct {
+    name:          string;        // Long name (e.g., "mode")
+    short:         string;        // Short form (e.g., "m")
+    arg_type:      string;        // Type as string: "string", "flag", "enum", "int", "float"
+    values:        [..] string;   // For enum: allowed values
+    default_value: string;        // Default value
+    required:      bool;          // Whether this argument is required
+    description:   string;        // Human-readable description
+}
+
+// UI configuration
+UI_Config :: struct {
+    display_mode: string;  // "contexts", "contexts_with_args", "history", "all"
+}
+
 // Preset hotkey options for install scripts
 Hotkey_Preset :: enum {
     NONE;              // No hotkey
@@ -141,6 +176,12 @@ create_default_config :: () -> User_Config {
     config.hotkey.enabled = true;
     config.hotkey.key = copy_string("P");
     config.hotkey.modifiers = copy_string("Ctrl+Alt");
+
+    // Default contexts settings
+    config.contexts.auto_create = false;
+
+    // Default UI settings
+    config.ui.display_mode = copy_string("all");
 
     return config;
 }
@@ -198,6 +239,12 @@ parse_config_string :: (toml_content: string, config: User_Config = .{}) -> User
 
     // Parse [hotkey] section
     parse_hotkey_section(table, *result);
+
+    // Parse [[contexts.definitions]] section
+    parse_contexts_section(table, *result);
+
+    // Parse [ui] section
+    parse_ui_section(table, *result);
 
     return result, !result.has_error;
 }
@@ -420,6 +467,125 @@ parse_hotkey_section :: (root: *toml.Toml_Table, config: *User_Config) {
     }
 }
 
+parse_contexts_section :: (root: *toml.Toml_Table, config: *User_Config) {
+    contexts_table := toml.get_table(root, "contexts");
+    if contexts_table == null return;
+
+    // Parse auto_create setting
+    auto_create, auto_create_ok := toml.get_bool(contexts_table, "auto_create");
+    if auto_create_ok {
+        config.contexts.auto_create = auto_create;
+    }
+
+    // Parse [[contexts.definitions]] array of tables
+    definitions := toml.get_array(contexts_table, "definitions");
+    if definitions == null return;
+
+    len := toml.array_len(definitions);
+    for i: 0..len-1 {
+        def_table := toml.array_get_table(definitions, i);
+        if def_table == null continue;
+
+        ctx_def: Config_Context_Definition;
+
+        // Parse context name
+        name, name_ok := toml.get_string(def_table, "name");
+        if name_ok {
+            ctx_def.name = copy_string(name);
+        } else {
+            continue;  // Name is required
+        }
+
+        // Parse description
+        desc, desc_ok := toml.get_string(def_table, "description");
+        if desc_ok {
+            ctx_def.description = copy_string(desc);
+        }
+
+        // Parse [[contexts.definitions.args]] array of argument definitions
+        args_array := toml.get_array(def_table, "args");
+        if args_array != null {
+            args_len := toml.array_len(args_array);
+            for j: 0..args_len-1 {
+                arg_table := toml.array_get_table(args_array, j);
+                if arg_table == null continue;
+
+                arg_def := parse_arg_definition(arg_table);
+                array_add(*ctx_def.args, arg_def);
+            }
+        }
+
+        array_add(*config.contexts.definitions, ctx_def);
+    }
+}
+
+parse_arg_definition :: (arg_table: *toml.Toml_Table) -> Config_Arg_Definition {
+    arg_def: Config_Arg_Definition;
+
+    // Parse name (required)
+    name, name_ok := toml.get_string(arg_table, "name");
+    if name_ok {
+        arg_def.name = copy_string(name);
+    }
+
+    // Parse short form
+    short, short_ok := toml.get_string(arg_table, "short");
+    if short_ok {
+        arg_def.short = copy_string(short);
+    }
+
+    // Parse type
+    type_str, type_ok := toml.get_string(arg_table, "type");
+    if type_ok {
+        arg_def.arg_type = copy_string(type_str);
+    } else {
+        arg_def.arg_type = copy_string("string");
+    }
+
+    // Parse default value
+    default_val, default_ok := toml.get_string(arg_table, "default");
+    if default_ok {
+        arg_def.default_value = copy_string(default_val);
+    }
+
+    // Parse required flag
+    required, required_ok := toml.get_bool(arg_table, "required");
+    if required_ok {
+        arg_def.required = required;
+    }
+
+    // Parse description
+    desc, desc_ok := toml.get_string(arg_table, "description");
+    if desc_ok {
+        arg_def.description = copy_string(desc);
+    }
+
+    // Parse enum values array
+    values := toml.get_array(arg_table, "values");
+    if values != null {
+        values_len := toml.array_len(values);
+        for k: 0..values_len-1 {
+            val, ok := toml.array_get_string(values, k);
+            if ok {
+                array_add(*arg_def.values, copy_string(val));
+            }
+        }
+    }
+
+    return arg_def;
+}
+
+parse_ui_section :: (root: *toml.Toml_Table, config: *User_Config) {
+    ui := toml.get_table(root, "ui");
+    if ui == null return;
+
+    display_mode, display_mode_ok := toml.get_string(ui, "display_mode");
+    if display_mode_ok {
+        free(config.ui.display_mode);
+        config.ui.display_mode = copy_string(display_mode);
+    }
+}
+
 // ============================================================================
 // Utility Functions
 // ============================================================================
@@ -555,6 +721,25 @@ free_param_definition :: (param: *Param_Definition) {
     array_free(param.values);
 }
 
+free_config_arg_definition :: (arg: *Config_Arg_Definition) {
+    free(arg.name);
+    free(arg.short);
+    free(arg.arg_type);
+    free(arg.default_value);
+    free(arg.description);
+    for arg.values free(it);
+    array_free(arg.values);
+}
+
+free_config_context_definition :: (ctx: *Config_Context_Definition) {
+    free(ctx.name);
+    free(ctx.description);
+    for *ctx.args {
+        free_config_arg_definition(it);
+    }
+    array_free(ctx.args);
+}
+
 free_user_config :: (config: *User_Config) {
     // Free context arrays
     for config.context_rules.allowed_projects free(it);
@@ -578,6 +763,12 @@ free_user_config :: (config: *User_Config) {
     }
     array_free(config.params.definitions);
 
+    // Free context definitions
+    for *config.contexts.definitions {
+        free_config_context_definition(it);
+    }
+    array_free(config.contexts.definitions);
+
     // Free daemon settings
     if config.daemon.socket_path.count > 0 free(config.daemon.socket_path);
     if config.daemon.log_level.count > 0 free(config.daemon.log_level);
@@ -585,6 +776,9 @@ free_user_config :: (config: *User_Config) {
     // Free hotkey settings
     if config.hotkey.key.count > 0 free(config.hotkey.key);
     if config.hotkey.modifiers.count > 0 free(config.hotkey.modifiers);
+
+    // Free UI settings
+    if config.ui.display_mode.count > 0 free(config.ui.display_mode);
 
     // Free error message and source path
     if config.error_message.count > 0 free(config.error_message);

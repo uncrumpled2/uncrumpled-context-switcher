@@ -172,11 +172,16 @@ find_available_test_port :: (start_port: u16 = 49152) -> u16 {
 
 // Wait utilities
 sleep_ms :: (ms: int) {
-    #import "POSIX";
-    spec: timespec;
-    spec.tv_sec = ms / 1000;
-    spec.tv_nsec = (ms % 1000) * 1_000_000;
-    nanosleep(*spec, null);
+    #if OS == .WINDOWS {
+        #import "Windows";
+        Sleep(cast(s32) ms);
+    } else {
+        #import "POSIX";
+        spec: timespec;
+        spec.tv_sec = ms / 1000;
+        spec.tv_nsec = (ms % 1000) * 1_000_000;
+        nanosleep(*spec, null);
+    }
 }
 
 // Retry helper - retries a function until it succeeds or max retries reached

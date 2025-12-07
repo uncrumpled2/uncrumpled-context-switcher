@@ -43,6 +43,9 @@
 #if OS == .LINUX || OS == .MACOS {
     #import "POSIX";
 }
+#if OS == .WINDOWS {
+    #import "Windows";
+}
 #import "Thread";
 
 // ============================================================================
@@ -57,7 +60,11 @@
 SDK_VERSION :: "1.0.0";
 
 // Default configuration values
-SDK_DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled.sock";
+#if OS == .WINDOWS {
+    SDK_DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context";
+} else {
+    SDK_DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled.sock";
+}
 SDK_DEFAULT_HEARTBEAT_INTERVAL :: 30;  // seconds
 SDK_DEFAULT_RECV_BUFFER_SIZE :: 65536;
 SDK_DEFAULT_SEND_BUFFER_SIZE :: 8192;
@@ -206,7 +213,11 @@ Service_Client :: struct {
 
     // Connection state
     state: SDK_Client_State;
-    socket_fd: s32;
+    #if OS == .WINDOWS {
+        pipe_handle: HANDLE;
+    } else {
+        socket_fd: s32;
+    }
     daemon_socket_path: string;
 
     // Registration info (if registered)
@@ -215,7 +226,11 @@ Service_Client :: struct {
     session_id: string;
 
     // Listener socket (for receiving notifications)
-    listener_fd: s32;
+    #if OS == .WINDOWS {
+        listener_handle: HANDLE;
+    } else {
+        listener_fd: s32;
+    }
     listener_path: string;
     listener_active: bool;
 
@@ -251,8 +266,13 @@ init_service_client_with_config :: (client: *Service_Client, config: Service_Cli
 
     client.config = config;
     client.state = .DISCONNECTED;
-    client.socket_fd = -1;
-    client.listener_fd = -1;
+    #if OS == .WINDOWS {
+        client.pipe_handle = INVALID_HANDLE_VALUE;
+        client.listener_handle = INVALID_HANDLE_VALUE;
+    } else {
+        client.socket_fd = -1;
+        client.listener_fd = -1;
+    }
     client.is_registered = false;
     client.listener_active = false;
     client.next_request_id = 1;
@@ -327,7 +347,39 @@ connect :: (client: *Service_Client, socket_path: string = "") -> bool {
 
     client.state = .CONNECTING;
 
-    #if OS == .LINUX || OS == .MACOS {
+    #if OS == .WINDOWS {
+        // Connect to named pipe
+        path_cstr := to_c_string(path);
+        defer free(path_cstr);
+
+        client.pipe_handle = CreateFileA(
+            path_cstr,
+            GENERIC_READ | GENERIC_WRITE,
+            0,      // No sharing
+            null,   // Default security
+            OPEN_EXISTING,
+            0,      // Default attributes
+            null    // No template
+        );
+
+        if client.pipe_handle == INVALID_HANDLE_VALUE {
+            client.state = .ERROR;
+            client.stats.errors += 1;
+            return false;
+        }
+
+        // Set pipe mode to message mode
+        mode: DWORD = PIPE_READMODE_BYTE;
+        SetNamedPipeHandleState(client.pipe_handle, *mode, null, null);
+
+        // Store the path
+        client.daemon_socket_path = copy_string(path);
+        client.state = .CONNECTED;
+        client.stats.connected_at = current_time_consensus();
+
+        return true;
+
+    } else #if OS == .LINUX || OS == .MACOS {
         // Create socket
         client.socket_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if client.socket_fd < 0 {
@@ -381,9 +433,16 @@ disconnect :: (client: *Service_Client) {
 
 // Internal disconnect (must hold mutex)
 disconnect_internal :: (client: *Service_Client) {
-    if client.socket_fd >= 0 {
-        close(client.socket_fd);
-        client.socket_fd = -1;
+    #if OS == .WINDOWS {
+        if client.pipe_handle != INVALID_HANDLE_VALUE {
+            CloseHandle(client.pipe_handle);
+            client.pipe_handle = INVALID_HANDLE_VALUE;
+        }
+    } else {
+        if client.socket_fd >= 0 {
+            close(client.socket_fd);
+            client.socket_fd = -1;
+        }
     }
 
     free(client.daemon_socket_path);
@@ -783,6 +842,156 @@ get_context :: (client: *Service_Client) -> string, bool {
     return response, true;
 }
 
+// List all contexts with their schemas and history
+// Returns raw JSON response, caller must parse
+list_contexts :: (client: *Service_Client) -> string, bool {
+    if !client.initialized return "", false;
+
+    lock(*client.mutex);
+    defer unlock(*client.mutex);
+
+    if client.state != .CONNECTED && client.state != .REGISTERED {
+        return "", false;
+    }
+
+    json := tprint("{\"jsonrpc\":\"2.0\",\"method\":\"context.list\",\"id\":%}", client.next_request_id);
+    client.next_request_id += 1;
+
+    success := send_request_internal(client, json);
+    if !success {
+        return "", false;
+    }
+
+    response := receive_response_internal(client);
+    if response.count == 0 {
+        return "", false;
+    }
+
+    return response, true;
+}
+
+// Switch to a context by input string (e.g., "work --mode=programming")
+// Returns raw JSON response, caller must parse
+switch_context :: (client: *Service_Client, input: string) -> string, bool {
+    if !client.initialized return "", false;
+
+    lock(*client.mutex);
+    defer unlock(*client.mutex);
+
+    if client.state != .CONNECTED && client.state != .REGISTERED {
+        return "", false;
+    }
+
+    // Escape quotes in input
+    escaped_input := sdk_escape_json_string(input);
+    defer free(escaped_input);
+
+    json := tprint("{\"jsonrpc\":\"2.0\",\"method\":\"context.switch\",\"params\":{\"input\":\"%\"},\"id\":%}",
+                   escaped_input, client.next_request_id);
+    client.next_request_id += 1;
+
+    success := send_request_internal(client, json);
+    if !success {
+        return "", false;
+    }
+
+    response := receive_response_internal(client);
+    if response.count == 0 {
+        return "", false;
+    }
+
+    return response, true;
+}
+
+// Create a new context definition
+// Returns raw JSON response, caller must parse
+create_context :: (client: *Service_Client, name: string, description: string = "") -> string, bool {
+    if !client.initialized return "", false;
+
+    lock(*client.mutex);
+    defer unlock(*client.mutex);
+
+    if client.state != .CONNECTED && client.state != .REGISTERED {
+        return "", false;
+    }
+
+    escaped_name := sdk_escape_json_string(name);
+    defer free(escaped_name);
+    escaped_desc := sdk_escape_json_string(description);
+    defer free(escaped_desc);
+
+    json := tprint("{\"jsonrpc\":\"2.0\",\"method\":\"context.create\",\"params\":{\"name\":\"%\",\"description\":\"%\"},\"id\":%}",
+                   escaped_name, escaped_desc, client.next_request_id);
+    client.next_request_id += 1;
+
+    success := send_request_internal(client, json);
+    if !success {
+        return "", false;
+    }
+
+    response := receive_response_internal(client);
+    if response.count == 0 {
+        return "", false;
+    }
+
+    return response, true;
+}
+
+// Delete a context definition
+// Returns raw JSON response, caller must parse
+delete_context :: (client: *Service_Client, name: string) -> string, bool {
+    if !client.initialized return "", false;
+
+    lock(*client.mutex);
+    defer unlock(*client.mutex);
+
+    if client.state != .CONNECTED && client.state != .REGISTERED {
+        return "", false;
+    }
+
+    escaped_name := sdk_escape_json_string(name);
+    defer free(escaped_name);
+
+    json := tprint("{\"jsonrpc\":\"2.0\",\"method\":\"context.delete\",\"params\":{\"name\":\"%\"},\"id\":%}",
+                   escaped_name, client.next_request_id);
+    client.next_request_id += 1;
+
+    success := send_request_internal(client, json);
+    if !success {
+        return "", false;
+    }
+
+    response := receive_response_internal(client);
+    if response.count == 0 {
+        return "", false;
+    }
+
+    return response, true;
+}
+
+// Helper to escape JSON strings (SDK internal)
+sdk_escape_json_string :: (s: string) -> string {
+    builder: String_Builder;
+    init_string_builder(*builder);
+
+    for i: 0..s.count-1 {
+        c := s[i];
+        if c == {
+            case #char "\""; append(*builder, "\\\"");
+            case #char "\\"; append(*builder, "\\\\");
+            case #char "\n"; append(*builder, "\\n");
+            case #char "\r"; append(*builder, "\\r");
+            case #char "\t"; append(*builder, "\\t");
+            case;
+                buf: [1] u8;
+                buf[0] = c;
+                append(*builder, string.{1, buf.data});
+        }
+    }
+
+    return builder_to_string(*builder);
+}
+
 // Subscribe to events
 subscribe_to_events :: (client: *Service_Client, events: [] string) -> bool {
     if !client.initialized return false;
@@ -866,42 +1075,82 @@ reset_stats :: (client: *Service_Client) {
 
 // Send a request to the daemon (internal, must hold mutex)
 send_request_internal :: (client: *Service_Client, json: string) -> bool {
-    if client.socket_fd < 0 {
-        return false;
+    #if OS == .WINDOWS {
+        if client.pipe_handle == INVALID_HANDLE_VALUE {
+            return false;
+        }
+
+        bytes_written: DWORD;
+        success := WriteFile(client.pipe_handle, json.data, cast(DWORD) json.count, *bytes_written, null);
+        if !success {
+            client.stats.errors += 1;
+            return false;
+        }
+
+        client.stats.requests_sent += 1;
+        client.stats.bytes_sent += cast(u64) bytes_written;
+
+        return true;
+    } else {
+        if client.socket_fd < 0 {
+            return false;
+        }
+
+        bytes_sent := write(client.socket_fd, json.data, cast(u64) json.count);
+        if bytes_sent < 0 {
+            client.stats.errors += 1;
+            return false;
+        }
+
+        client.stats.requests_sent += 1;
+        client.stats.bytes_sent += cast(u64) bytes_sent;
+
+        return true;
     }
-
-    bytes_sent := write(client.socket_fd, json.data, cast(u64) json.count);
-    if bytes_sent < 0 {
-        client.stats.errors += 1;
-        return false;
-    }
-
-    client.stats.requests_sent += 1;
-    client.stats.bytes_sent += cast(u64) bytes_sent;
-
-    return true;
 }
 
 // Receive a response from the daemon (internal, must hold mutex)
 receive_response_internal :: (client: *Service_Client) -> string {
-    if client.socket_fd < 0 {
-        return "";
+    #if OS == .WINDOWS {
+        if client.pipe_handle == INVALID_HANDLE_VALUE {
+            return "";
+        }
+
+        buffer: [8192] u8;
+        bytes_read: DWORD;
+        success := ReadFile(client.pipe_handle, buffer.data, 8191, *bytes_read, null);
+
+        if !success || bytes_read == 0 {
+            return "";
+        }
+
+        buffer[bytes_read] = 0;
+        response := copy_string(string.{cast(s64) bytes_read, buffer.data});
+
+        client.stats.responses_received += 1;
+        client.stats.bytes_received += cast(u64) bytes_read;
+
+        return response;
+    } else {
+        if client.socket_fd < 0 {
+            return "";
+        }
+
+        buffer: [8192] u8;
+        bytes_read := read(client.socket_fd, buffer.data, 8191);
+
+        if bytes_read <= 0 {
+            return "";
+        }
+
+        buffer[bytes_read] = 0;
+        response := copy_string(string.{bytes_read, buffer.data});
+
+        client.stats.responses_received += 1;
+        client.stats.bytes_received += cast(u64) bytes_read;
+
+        return response;
     }
-
-    buffer: [8192] u8;
-    bytes_read := read(client.socket_fd, buffer.data, 8191);
-
-    if bytes_read <= 0 {
-        return "";
-    }
-
-    buffer[bytes_read] = 0;
-    response := copy_string(string.{bytes_read, buffer.data});
-
-    client.stats.responses_received += 1;
-    client.stats.bytes_received += cast(u64) bytes_read;
-
-    return response;
 }
 
 // Build registration JSON
