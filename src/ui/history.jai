@@ -396,8 +396,8 @@ get_json_value :: (obj: *jason.JSON_Object, key: string) -> *jason.JSON_Value {
 load_history :: (manager: *History_Manager) -> bool {
     if manager == null return false;
 
-    // Read file contents
-    contents, success := read_entire_file(manager.history_path);
+    // Read file contents (log_errors = false because file may not exist on first run)
+    contents, success := read_entire_file(manager.history_path, log_errors = false);
     if !success {
         // File doesn't exist yet - not an error
         return true;
