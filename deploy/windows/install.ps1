@@ -37,7 +37,7 @@ Options:
   -Service     Install as a Windows service (requires Administrator privileges)
   -Startup     Install as a user startup application
   -Update      Update binaries only (preserve config, restart service)
-  -Dev         Development mode (build + update, no service restart)
+  -Dev         Development mode (build + copy DLLs/fonts to bin folder)
   -Uninstall   Remove the installation
   -Help        Show this help message
 
@@ -45,13 +45,18 @@ Examples:
   .\install.ps1 -Startup          Install for current user (auto-start on login)
   .\install.ps1 -Service          Install as Windows service (admin required)
   .\install.ps1 -Update           Update binaries, preserve config, restart service
-  .\install.ps1 -Dev              Quick rebuild and update for development
+  .\install.ps1 -Dev              Build and set up bin\ folder with DLLs and fonts
   .\install.ps1 -Uninstall        Remove installation
 
 Paths:
   Installation: $InstallDir
+  Fonts:        $InstallDir\fonts
   Configuration: $ConfigDir\config.toml
   Logs: $LogDir\daemon.log
+
+Required DLLs (auto-copied during install):
+  - skia.dll, skia_ref_helper.dll (from modules\)
+  - SDL2.dll (from Jai installation or modules\)
 
 "@
 }
@@ -281,7 +286,99 @@ function Install-Binaries {
         Write-Host "Installed CLI: $cliDest"
     }
 
+    # Copy required DLL files
+    Install-DLLs
+
+    # Copy fonts
+    Install-Fonts
+
     return $daemonDest
+}
+
+function Install-DLLs {
+    param([string]$TargetDir = $InstallDir)
+
+    Write-Host "Installing required DLLs to $TargetDir..."
+
+    # Skia DLLs from modules directory
+    $skiaDll = Join-Path $ProjectRoot "modules\skia.dll"
+    $skiaRefHelperDll = Join-Path $ProjectRoot "modules\skia_ref_helper.dll"
+
+    if (Test-Path $skiaDll) {
+        Copy-Item -Path $skiaDll -Destination $TargetDir -Force
+        Write-Host "  Copied: skia.dll"
+    } else {
+        Write-Warning "  skia.dll not found at: $skiaDll"
+    }
+
+    if (Test-Path $skiaRefHelperDll) {
+        Copy-Item -Path $skiaRefHelperDll -Destination $TargetDir -Force
+        Write-Host "  Copied: skia_ref_helper.dll"
+    } else {
+        Write-Warning "  skia_ref_helper.dll not found at: $skiaRefHelperDll"
+    }
+
+    # SDL2.dll - check multiple locations (skip TargetDir to avoid copying to itself)
+    $sdlLocations = @(
+        (Join-Path $ProjectRoot "modules\SDL2.dll"),
+        "C:\jai\modules\SDL\windows\SDL2.dll"
+    )
+    # Add JAI_HOME path if environment variable is set
+    if ($env:JAI_HOME) {
+        $sdlLocations = @((Join-Path $env:JAI_HOME "modules\SDL\windows\SDL2.dll")) + $sdlLocations
+    }
+
+    $sdlFound = $false
+    foreach ($sdlPath in $sdlLocations) {
+        if (Test-Path $sdlPath) {
+            Copy-Item -Path $sdlPath -Destination $TargetDir -Force
+            Write-Host "  Copied: SDL2.dll (from $sdlPath)"
+            $sdlFound = $true
+            break
+        }
+    }
+
+    if (-not $sdlFound) {
+        Write-Warning "  SDL2.dll not found. Searched:"
+        foreach ($loc in $sdlLocations) {
+            Write-Warning "    $loc"
+        }
+        Write-Warning "  Please manually copy SDL2.dll to: $TargetDir"
+    }
+}
+
+function Install-Fonts {
+    param([string]$TargetDir = $InstallDir)
+
+    Write-Host "Installing fonts to $TargetDir..."
+
+    $fontsDir = Join-Path $TargetDir "fonts"
+    Ensure-Directory $fontsDir
+
+    $sourceFontsDir = Join-Path $ProjectRoot "fonts"
+    if (Test-Path $sourceFontsDir) {
+        $fontFiles = Get-ChildItem -Path $sourceFontsDir -Filter "*.ttf"
+        foreach ($font in $fontFiles) {
+            Copy-Item -Path $font.FullName -Destination $fontsDir -Force
+            Write-Host "  Copied: $($font.Name)"
+        }
+        if ($fontFiles.Count -eq 0) {
+            Write-Warning "  No .ttf files found in: $sourceFontsDir"
+        }
+    } else {
+        Write-Warning "  Fonts directory not found: $sourceFontsDir"
+    }
+}
+
+function Install-DevDependencies {
+    # Copy DLLs and fonts to bin directory for running exe directly during development
+    $binDir = Join-Path $ProjectRoot "bin"
+    Ensure-Directory $binDir
+
+    Write-Host ""
+    Write-Host "Setting up development environment..."
+    Install-DLLs -TargetDir $binDir
+    Install-Fonts -TargetDir $binDir
 }
 
 function Stop-RunningProcess {
@@ -506,6 +603,23 @@ function Uninstall {
         Write-Host "Removed binary: $cliPath"
     }
 
+    # Remove DLLs
+    $dllFiles = @("skia.dll", "skia_ref_helper.dll", "SDL2.dll")
+    foreach ($dll in $dllFiles) {
+        $dllPath = Join-Path $InstallDir $dll
+        if (Test-Path $dllPath) {
+            Remove-Item $dllPath -Force
+            Write-Host "Removed DLL: $dll"
+        }
+    }
+
+    # Remove fonts directory
+    $fontsDir = Join-Path $InstallDir "fonts"
+    if (Test-Path $fontsDir) {
+        Remove-Item $fontsDir -Recurse -Force
+        Write-Host "Removed fonts directory"
+    }
+
     Write-Host ""
     Write-Host "Uninstallation complete!"
     Write-Host ""
@@ -527,9 +641,19 @@ if ($Uninstall) {
     exit 0
 }
 
-# Dev mode: build first
+# Dev mode: build first and copy dependencies to bin
 if ($Dev) {
     Build-Project
+    Install-DevDependencies
+
+    # If no existing installation, just set up dev environment and exit
+    if (-not (Test-ExistingInstall)) {
+        Write-Host ""
+        Write-Host "Development environment ready!"
+        Write-Host "Run the executable from: $ProjectRoot\bin\$ExeName"
+        exit 0
+    }
+
     $Update = $true
 }
 
