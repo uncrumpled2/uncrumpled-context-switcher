@@ -158,7 +158,19 @@ sudo ./deploy/linux/install.sh --system
 
 # Enable and start
 systemctl --user enable --now uncrumpled-context-switcher
+systemctl --user start uncrumpled-context-switcher
+
+systemctl --user status uncrumpled-context-switcher
+
+journalctl --user -u uncrumpled-context-switcher -f
 ```
+
+systemctl --user daemon-reload
+systemctl --user restart uncrumpled-context-switcher
+
+Note: i did this TODO: static build?
+sudo cp /root/programming/repo/uncrumpled-context-switcher/modules/libskia.so /usr/local/lib/
+sudo ldconfig
 
 ### macOS (launchd)
 
@@ -186,38 +198,38 @@ systemctl --user enable --now uncrumpled-context-switcher
 
 ```bash
 # Run in foreground
-uncrumpled-daemon
+uncrumpled-context-switcher daemon
 
 # Run as daemon (background)
-uncrumpled-daemon --daemon
+uncrumpled-context-switcher-daemon --daemon
 
 # With custom socket path
-uncrumpled-daemon --socket /tmp/my-context.sock
+uncrumpled-context-switcher-daemon --socket /tmp/my-context.sock
 
 # With custom config
-uncrumpled-daemon --config ~/.config/uncrumpled/custom.toml
+uncrumpled-context-switcher-daemon --config ~/.config/uncrumpled/custom.toml
 ```
 
 ### CLI Commands
 
 ```bash
 # Get current context
-uncrumpled-cli context get
+uncrumpled-context-switcher-cli context get
 
 # Add a tag
-uncrumpled-cli context add-tag --work
+uncrumpled-context-switcher-cli context add-tag --work
 
 # Remove a tag
-uncrumpled-cli context remove-tag --work
+uncrumpled-context-switcher-cli context remove-tag --work
 
 # List registered services
-uncrumpled-cli service list
+uncrumpled-context-switcher-cli service list
 
 # View execution logs
-uncrumpled-cli logs list
+uncrumpled-context-switcher-cli logs list
 
 # Ping daemon
-uncrumpled-cli ping
+uncrumpled-context-switcher-cli ping
 ```
 
 ## Configuration
@@ -469,3 +481,4 @@ Contributions welcome! Please ensure:
 - Tests pass (`./tests/run_tests`)
 - Code compiles without warnings
 - Follow existing code style
+

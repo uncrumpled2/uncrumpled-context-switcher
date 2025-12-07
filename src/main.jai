@@ -18,9 +18,9 @@ skia :: #import "skia";
 search_items: [..]Search_Item;
 history_manager: *History_Manager;
 
-// Initialize search items - combines history with default items
+// Initialize search items from history
 init_search_items :: () {
-    // Start with history entries (most recently used first)
+    // Load history entries (most recently used first)
     if history_manager != null {
         history_entries := get_history_entries(history_manager);
         for entry: history_entries {
@@ -30,24 +30,7 @@ init_search_items :: () {
             array_add(*search_items, item);
         }
     }
-
-    // Add default items if history is empty or as fallback
-    if search_items.count == 0 {
-        default_items := string.[
-            "Chrome", "Firefox", "Spotify", "Slack", "Discord",
-            "Visual Studio Code", "Terminal", "Settings", "Calculator",
-            "Calendar", "Notes", "Figma", "Zoom", "Obsidian",
-            "Docker Desktop", "Postman", "TablePlus", "Sublime Text",
-            "VLC Media Player", "System Monitor", "Screenshot",
-            "Lock Screen", "Log Out", "Shutdown", "Restart"
-        ];
-
-        for default_items {
-            item: Search_Item;
-            item.text = it;
-            array_add(*search_items, item);
-        }
-    }
+    // No default items - only show what the user has actually used
 }
 
 // Refresh search items after history changes

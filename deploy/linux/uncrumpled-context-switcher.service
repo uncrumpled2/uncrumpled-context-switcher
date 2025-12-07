@@ -27,9 +27,11 @@ ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5
 
-# Socket and state file paths
+# Environment for X11 display access
 Environment=XDG_RUNTIME_DIR=%t
 Environment=DISPLAY=:0
+# Use X11 backend for global hotkey support (required for XGrabKey)
+Environment=SDL_VIDEODRIVER=x11
 RuntimeDirectory=uncrumpled-context-switcher
 RuntimeDirectoryMode=0700
 
