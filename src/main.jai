@@ -28,6 +28,14 @@ history_manager: *History_Manager;
 // Global SDK client for daemon communication
 sdk_client: Service_Client;
 sdk_connected: bool = false;
+sdk_initialized: bool = false;
+daemon_spawned: bool = false;
+
+// Connection retry state (non-blocking)
+connection_retry_count: s32 = 0;
+connection_last_attempt_time: float64 = 0;
+CONNECTION_RETRY_INTERVAL_MS :: 200;  // Time between retry attempts
+CONNECTION_MAX_RETRIES :: 20;         // Max attempts before showing error
 
 // Daemon executable name
 #if OS == .WINDOWS {
@@ -39,44 +47,109 @@ sdk_connected: bool = false;
     DAEMON_EXECUTABLE :: "uncrumpled-context-switcher-daemon";
 }
 
-// Try to connect to daemon, spawning it if necessary
-// Returns true if connected successfully, false otherwise
-connect_to_daemon :: () -> bool {
-    // Initialize SDK client
-    if !init_service_client(*sdk_client) {
-        print("Failed to initialize SDK client\n");
-        return false;
+// Spawn daemon at startup (fire-and-forget, no waiting)
+// This gives the daemon time to start while user isn't interacting yet
+ensure_daemon_spawned :: () {
+    if daemon_spawned return;
+
+    // Initialize SDK client if needed
+    if !sdk_initialized {
+        if !init_service_client(*sdk_client) {
+            print("Failed to initialize SDK client\n");
+            return;
+        }
+        sdk_initialized = true;
+    }
+
+    // Try to connect to see if daemon is already running
+    if connect(*sdk_client) {
+        print("Daemon already running\n");
+        sdk_connected = true;
+        daemon_spawned = true;
+        return;
+    }
+
+    // Spawn daemon process (don't wait for it)
+    print("Spawning daemon in background...\n");
+    if spawn_daemon() {
+        daemon_spawned = true;
+    } else {
+        print("Failed to spawn daemon\n");
+    }
+}
+
+// Try to connect to daemon (non-blocking, single attempt)
+// Returns true if connected, false if not yet connected
+try_connect_to_daemon :: () -> bool {
+    if sdk_connected return true;
+
+    // Initialize SDK client if needed
+    if !sdk_initialized {
+        if !init_service_client(*sdk_client) {
+            print("Failed to initialize SDK client\n");
+            return false;
+        }
+        sdk_initialized = true;
     }
 
     // Try to connect
     if connect(*sdk_client) {
         print("Connected to daemon\n");
+        sdk_connected = true;
+        connection_retry_count = 0;
         return true;
     }
 
-    print("Daemon not running, attempting to start...\n");
+    return false;
+}
 
-    // Spawn daemon process
-    if !spawn_daemon() {
-        print("Failed to spawn daemon\n");
+// Called when window becomes visible - reset retry state
+start_connection_attempts :: () {
+    if sdk_connected return;
+    connection_retry_count = 0;
+    connection_last_attempt_time = 0;
+}
+
+// Non-blocking connection tick - call this from main loop
+// Returns: true if connected, false if still trying or failed
+tick_connection :: () -> bool {
+    if sdk_connected return true;
+
+    // Check if we've exceeded max retries
+    if connection_retry_count >= CONNECTION_MAX_RETRIES {
         return false;
     }
 
-    // Retry connection with timeout (2 seconds, 10 attempts at 200ms each)
-    MAX_RETRIES :: 10;
-    RETRY_DELAY_MS :: 200;
-
-    for attempt: 0..MAX_RETRIES-1 {
-        sleep_milliseconds(RETRY_DELAY_MS);
-
-        if connect(*sdk_client) {
-            print("Connected to daemon after % attempts\n", attempt + 1);
-            return true;
-        }
+    // Check if enough time has passed since last attempt
+    current_time := seconds_since_init() * 1000.0;  // Convert to ms
+    if current_time - connection_last_attempt_time < cast(float64)CONNECTION_RETRY_INTERVAL_MS {
+        return false;
     }
 
-    print("Failed to connect to daemon after % attempts\n", MAX_RETRIES);
+    connection_last_attempt_time = current_time;
+    connection_retry_count += 1;
+
+    // Try to connect
+    if try_connect_to_daemon() {
+        print("Connected after % attempts\n", connection_retry_count);
+        return true;
+    }
+
+    if connection_retry_count >= CONNECTION_MAX_RETRIES {
+        print("Failed to connect after % attempts\n", CONNECTION_MAX_RETRIES);
+    }
+
     return false;
+}
+
+// Check if we're still actively trying to connect
+is_connecting :: () -> bool {
+    return !sdk_connected && connection_retry_count < CONNECTION_MAX_RETRIES;
+}
+
+// Check if connection has failed (exceeded max retries)
+has_connection_failed :: () -> bool {
+    return !sdk_connected && connection_retry_count >= CONNECTION_MAX_RETRIES;
 }
 
 // Spawn the daemon process
@@ -235,7 +308,7 @@ refresh_search_items :: () {
 }
 
 // Fetch contexts from daemon and refresh search items
-// This is called every time the window is shown
+// Only fetches if connected, doesn't block
 refresh_from_daemon :: () {
     if !sdk_connected return;
 
@@ -411,17 +484,10 @@ main :: () {
     }
     defer if history_manager != null deinit_history_manager(history_manager);
 
-    // Connect to daemon (spawns daemon if not running)
-    sdk_connected = connect_to_daemon();
-    if !sdk_connected {
-        error_msg := "Failed to connect to the Uncrumpled daemon.\n\nPlease ensure the daemon is installed and try again.";
-        print("Error: %\n", error_msg);
-        #if OS == .WINDOWS {
-            MessageBoxA(null, error_msg.data, "Daemon Connection Failed", MB_OK | MB_ICONERROR);
-        }
-        return;
-    }
-    defer deinit_service_client(*sdk_client);
+    // Spawn daemon in background (don't wait for connection)
+    // Connection will happen lazily when hotkey is pressed
+    ensure_daemon_spawned();
+    defer if sdk_initialized deinit_service_client(*sdk_client);
 
     // Initialize search items (uses history)
     init_search_items();
@@ -504,10 +570,15 @@ main :: () {
                 if window_state.is_visible {
                     start_animation(*fade_anim, 0.0, 1.0, 0.4);
 
-                    // Refresh contexts from daemon
-                    refresh_from_daemon();
+                    // Start connection attempts (resets retry counter)
+                    start_connection_attempts();
 
-                    // Update the results list with new data
+                    // If already connected, refresh immediately
+                    if sdk_connected {
+                        refresh_from_daemon();
+                    }
+
+                    // Update the results list with current data
                     update_results(*results_list, search_items, search_box.text);
                 }
             }
@@ -683,6 +754,15 @@ main :: () {
         update_animation(*fade_anim);
         update_dialog(dt);
 
+        // Tick connection attempts when visible and not yet connected
+        if window_state.is_visible && !sdk_connected {
+            if tick_connection() {
+                // Just connected! Fetch data from daemon
+                refresh_from_daemon();
+                update_results(*results_list, search_items, search_box.text);
+            }
+        }
+
         // Only render if visible (save CPU when hidden)
         if window_state.is_visible {
             // Render
@@ -710,6 +790,18 @@ main :: () {
 
             render_search_box(*search_box, renderer);
             render_results_list(*results_list, renderer);
+
+            // Show connection status if not connected
+            if has_connection_failed() {
+                status_color := make_color(1.0, 0.4, 0.4, fade_anim.current);  // Red-ish
+                draw_text(renderer, "Daemon unavailable - press hotkey to retry", 60, 530, status_color);
+            } else if is_connecting() {
+                status_color := make_color(1.0, 0.8, 0.3, fade_anim.current);  // Yellow-ish
+                // Show dots animation based on retry count
+                dots := connection_retry_count % 4;
+                status_text := ifx dots == 0 then "Connecting" else ifx dots == 1 then "Connecting." else ifx dots == 2 then "Connecting.." else "Connecting...";
+                draw_text(renderer, status_text, 60, 530, status_color);
+            }
 
             // Render confirmation dialog on top (if visible)
             render_confirmation_dialog(renderer);

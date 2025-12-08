@@ -338,7 +338,8 @@ connect :: (client: *Service_Client, socket_path: string = "") -> bool {
     lock(*client.mutex);
     defer unlock(*client.mutex);
 
-    if client.state != .DISCONNECTED {
+    // Allow connection from DISCONNECTED or ERROR states (retry after error)
+    if client.state != .DISCONNECTED && client.state != .ERROR {
         return false;  // Already connected or connecting
     }
 
@@ -354,8 +355,8 @@ connect :: (client: *Service_Client, socket_path: string = "") -> bool {
         path_cstr := to_c_string(path);
         defer free(path_cstr);
 
-        // Wait for the pipe to be available (up to 5 seconds)
-        if !WaitNamedPipeA(path_cstr, 5000) {
+        // Wait for the pipe to be available (short timeout for non-blocking retries)
+        if !WaitNamedPipeA(path_cstr, 100) {
             client.state = .ERROR;
             client.stats.errors += 1;
             return false;
