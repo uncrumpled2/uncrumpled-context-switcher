@@ -328,7 +328,7 @@ ensure_history_dir :: (manager: *History_Manager) -> bool {
     if manager == null return false;
 
     dir := get_history_dir();
-    defer free(dir);
+    // Note: dir is from tprint(), so don't free it
 
     // Use make_directory_if_it_does_not_exist from File module
     return make_directory_if_it_does_not_exist(dir, recursive = true);
