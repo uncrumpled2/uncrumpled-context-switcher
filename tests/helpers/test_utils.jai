@@ -12,10 +12,39 @@
 #import "String";
 #import "Random";
 
+#if OS == .WINDOWS {
+    kernel32_test :: #system_library "kernel32";
+    GetEnvironmentVariableA_Test :: (lpName: *u8, lpBuffer: *u8, nSize: u32) -> u32 #foreign kernel32_test "GetEnvironmentVariableA";
+    GetTempPathA :: (nBufferLength: u32, lpBuffer: *u8) -> u32 #foreign kernel32_test;
+}
+
 // Temporary test directory management
 Temp_Test_Dir :: struct {
     path: string;
     created: bool;
+}
+
+// Get platform-appropriate temp directory for tests
+get_test_temp_dir :: () -> string {
+    #if OS == .WINDOWS {
+        // Use Windows GetTempPath API
+        buffer: [512] u8;
+        len := GetTempPathA(512, buffer.data);
+        if len > 0 && len < 512 {
+            // Remove trailing backslash if present
+            result_len := cast(s64) len;
+            if result_len > 0 && buffer[result_len - 1] == #char "\\" {
+                result_len -= 1;
+            }
+            result: string;
+            result.data = buffer.data;
+            result.count = result_len;
+            return copy_string(result);
+        }
+        return copy_string("C:\\Windows\\Temp");
+    } else {
+        return "/tmp";
+    }
 }
 
 // Create a temporary test directory with a unique name
@@ -25,7 +54,12 @@ create_temp_test_dir :: (prefix := "test_") -> Temp_Test_Dir {
     // Use timestamp and random number for uniqueness
     timestamp := cast(s64)(seconds_since_init() * 1000000);
     rand := random_get() % 10000;
-    dir_name := tprint("/tmp/%_%_%", prefix, timestamp, rand);
+    temp_base := get_test_temp_dir();
+    #if OS == .WINDOWS {
+        dir_name := tprint("%\\%_%_%", temp_base, prefix, timestamp, rand);
+    } else {
+        dir_name := tprint("%/%_%_%", temp_base, prefix, timestamp, rand);
+    }
 
     success := make_directory_if_it_does_not_exist(dir_name);
     if success {
@@ -62,10 +96,15 @@ cleanup_temp_test_dir :: (dir: *Temp_Test_Dir) {
 }
 
 // Create a temporary file with given content
-create_temp_file :: (content: string, extension := ".txt", dir := "/tmp") -> string, bool {
+create_temp_file :: (content: string, extension := ".txt", dir := "") -> string, bool {
+    actual_dir := ifx dir.count > 0 then dir else get_test_temp_dir();
     timestamp := cast(s64)(seconds_since_init() * 1000000);
     rand := random_get() % 10000;
-    file_path := tprint("%/test_%_%_%", dir, timestamp, rand, extension);
+    #if OS == .WINDOWS {
+        file_path := tprint("%\\test_%_%_%", actual_dir, timestamp, rand, extension);
+    } else {
+        file_path := tprint("%/test_%_%_%", actual_dir, timestamp, rand, extension);
+    }
 
     success := write_entire_file(file_path, content);
     if success {

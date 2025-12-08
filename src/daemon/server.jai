@@ -34,6 +34,7 @@ Daemon_Server :: struct {
 
     // State stores
     context_store: *Context_Store;
+    context_registry: *Context_Registry;  // For multi-context support (context.list, switch, create, delete)
     service_registry: *Service_Registry;
     subscription_manager: *Subscription_Manager;
     session_manager: *Session_Manager;
@@ -97,6 +98,9 @@ init_daemon_server :: (server: *Daemon_Server, socket_path: string, config: *Use
     // Initialize state stores
     server.context_store = New(Context_Store);
     init_context_store(server.context_store);
+
+    server.context_registry = New(Context_Registry);
+    init_context_registry(server.context_registry, auto_create = true);  // auto-create contexts on switch
 
     server.service_registry = New(Service_Registry);
     init_service_registry(server.service_registry);
@@ -164,6 +168,11 @@ destroy_daemon_server :: (server: *Daemon_Server) {
     if server.context_store {
         destroy_context_store(server.context_store);
         free(server.context_store);
+    }
+
+    if server.context_registry {
+        destroy_context_registry(server.context_registry);
+        free(server.context_registry);
     }
 
     if server.service_registry {
@@ -441,6 +450,12 @@ route_request :: (server: *Daemon_Server, request: *JSONRPC_Request) -> string {
     method := request.method;
 
     // Route to appropriate API handler
+    // First check for context registry methods (context.list, switch, create, delete)
+    if is_context_registry_method(method) {
+        api_result := route_context_registry_method(server.context_registry, request);
+        return api_result.response;
+    }
+
     if is_context_method(method) {
         api_result := route_context_method(server.context_store, request);
         return api_result.response;

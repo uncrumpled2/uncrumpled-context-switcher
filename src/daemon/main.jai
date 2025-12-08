@@ -34,7 +34,7 @@
     kernel32_main :: #system_library "kernel32";
     GetCurrentProcessId :: () -> u32 #foreign kernel32_main;
     OpenProcess :: (dwDesiredAccess: u32, bInheritHandle: s32, dwProcessId: u32) -> *void #foreign kernel32_main;
-    // Note: CloseHandle is defined in ipc.jai which is loaded below
+    CloseHandle :: (hObject: *void) -> s32 #foreign kernel32_main;
 }
 
 // Load daemon modules (they import their own dependencies like jason, jai-toml-c)

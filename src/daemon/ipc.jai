@@ -843,6 +843,8 @@ GENERIC_READ :: 0x80000000;
 GENERIC_WRITE :: 0x40000000;
 OPEN_EXISTING :: 3;
 FILE_FLAG_OVERLAPPED :: 0x40000000;
+ERROR_IO_PENDING :: 997;
+ERROR_PIPE_LISTENING :: 536;
 ERROR_PIPE_BUSY :: 231;
 ERROR_PIPE_CONNECTED :: 535;
 ERROR_NO_DATA :: 232;
@@ -920,10 +922,11 @@ start_windows_server :: (server: *IPC_Server) -> bool {
     pipe_name := ipc_to_c_string(server.socket_path);
     defer free(pipe_name);
 
+    // Use PIPE_NOWAIT for non-blocking ConnectNamedPipe
     pipe_handle := CreateNamedPipeA(
         pipe_name,
         PIPE_ACCESS_DUPLEX,
-        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+        PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT,
         PIPE_UNLIMITED_INSTANCES,
         cast(DWORD) IPC_BUFFER_SIZE,
         cast(DWORD) IPC_BUFFER_SIZE,
@@ -993,19 +996,26 @@ accept_windows_connections :: (server: *IPC_Server) -> s32 {
         return 0;  // No free slots
     }
 
-    // For named pipes, ConnectNamedPipe waits for a client
-    // We need to create a new pipe instance for the server to continue accepting
+    // For named pipes with PIPE_NOWAIT, ConnectNamedPipe returns immediately
     pipe_name := ipc_to_c_string(server.socket_path);
     defer free(pipe_name);
 
     // The current server_fd becomes the client connection
     // We create a new server pipe for future connections
     if server.server_fd >= 0 {
-        // Try to connect a client to the existing pipe
+        // Try to connect a client to the existing pipe (non-blocking with PIPE_NOWAIT)
         result := ConnectNamedPipe(cast(HANDLE) cast(u64) server.server_fd, null);
         err := GetLastError();
 
-        if result || err == ERROR_PIPE_CONNECTED {
+        // With PIPE_NOWAIT:
+        // - result=TRUE: connection completed (rare)
+        // - result=FALSE with ERROR_PIPE_CONNECTED: client already connected
+        // - result=FALSE with ERROR_PIPE_LISTENING: no client yet (non-blocking return)
+        // - result=FALSE with other error: actual error
+
+        client_connected := result || err == ERROR_PIPE_CONNECTED;
+
+        if client_connected {
             // Client connected
             free_slot.id = server.next_connection_id;
             server.next_connection_id += 1;
@@ -1021,11 +1031,11 @@ accept_windows_connections :: (server: *IPC_Server) -> s32 {
             server.total_connections += 1;
             accepted += 1;
 
-            // Create a new pipe for the next client
+            // Create a new pipe for the next client (with PIPE_NOWAIT for non-blocking)
             new_pipe := CreateNamedPipeA(
                 pipe_name,
                 PIPE_ACCESS_DUPLEX,
-                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_NOWAIT,
                 PIPE_UNLIMITED_INSTANCES,
                 cast(DWORD) IPC_BUFFER_SIZE,
                 cast(DWORD) IPC_BUFFER_SIZE,
@@ -1039,6 +1049,7 @@ accept_windows_connections :: (server: *IPC_Server) -> s32 {
                 server.server_fd = cast(s32) cast(u64) new_pipe;
             }
         }
+        // If ERROR_PIPE_LISTENING, no client yet - just return and try again next iteration
     }
 
     return accepted;

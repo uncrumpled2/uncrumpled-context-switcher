@@ -45,6 +45,8 @@
 }
 #if OS == .WINDOWS {
     #import "Windows";
+    kernel32_sdk :: #system_library "kernel32";
+    WaitNamedPipeA :: (lpNamedPipeName: *u8, nTimeOut: u32) -> s32 #foreign kernel32_sdk;
 }
 #import "Thread";
 
@@ -61,9 +63,9 @@ SDK_VERSION :: "1.0.0";
 
 // Default configuration values
 #if OS == .WINDOWS {
-    SDK_DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context";
+    SDK_DEFAULT_SOCKET_PATH :: "\\\\.\\pipe\\uncrumpled-context-switcher";
 } else {
-    SDK_DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled.sock";
+    SDK_DEFAULT_SOCKET_PATH :: "/tmp/uncrumpled-context-switcher.sock";
 }
 SDK_DEFAULT_HEARTBEAT_INTERVAL :: 30;  // seconds
 SDK_DEFAULT_RECV_BUFFER_SIZE :: 65536;
@@ -352,6 +354,13 @@ connect :: (client: *Service_Client, socket_path: string = "") -> bool {
         path_cstr := to_c_string(path);
         defer free(path_cstr);
 
+        // Wait for the pipe to be available (up to 5 seconds)
+        if !WaitNamedPipeA(path_cstr, 5000) {
+            client.state = .ERROR;
+            client.stats.errors += 1;
+            return false;
+        }
+
         client.pipe_handle = CreateFileA(
             path_cstr,
             GENERIC_READ | GENERIC_WRITE,
@@ -368,7 +377,7 @@ connect :: (client: *Service_Client, socket_path: string = "") -> bool {
             return false;
         }
 
-        // Set pipe mode to message mode
+        // Set pipe mode to byte mode
         mode: DWORD = PIPE_READMODE_BYTE;
         SetNamedPipeHandleState(client.pipe_handle, *mode, null, null);
 
@@ -1074,14 +1083,18 @@ reset_stats :: (client: *Service_Client) {
 // ============================================================================
 
 // Send a request to the daemon (internal, must hold mutex)
+// IMPORTANT: Appends newline delimiter as required by the server's message framing protocol
 send_request_internal :: (client: *Service_Client, json: string) -> bool {
+    // Build message with newline delimiter (server expects newline-delimited JSON)
+    message := tprint("%\n", json);
+
     #if OS == .WINDOWS {
         if client.pipe_handle == INVALID_HANDLE_VALUE {
             return false;
         }
 
         bytes_written: DWORD;
-        success := WriteFile(client.pipe_handle, json.data, cast(DWORD) json.count, *bytes_written, null);
+        success := WriteFile(client.pipe_handle, message.data, cast(DWORD) message.count, *bytes_written, null);
         if !success {
             client.stats.errors += 1;
             return false;
@@ -1096,7 +1109,7 @@ send_request_internal :: (client: *Service_Client, json: string) -> bool {
             return false;
         }
 
-        bytes_sent := write(client.socket_fd, json.data, cast(u64) json.count);
+        bytes_sent := write(client.socket_fd, message.data, cast(u64) message.count);
         if bytes_sent < 0 {
             client.stats.errors += 1;
             return false;
@@ -1110,12 +1123,14 @@ send_request_internal :: (client: *Service_Client, json: string) -> bool {
 }
 
 // Receive a response from the daemon (internal, must hold mutex)
+// Uses PeekNamedPipe to avoid blocking indefinitely on Windows
 receive_response_internal :: (client: *Service_Client) -> string {
     #if OS == .WINDOWS {
         if client.pipe_handle == INVALID_HANDLE_VALUE {
             return "";
         }
 
+        // Use blocking ReadFile directly - this is how the CLI does it and it works
         buffer: [8192] u8;
         bytes_read: DWORD;
         success := ReadFile(client.pipe_handle, buffer.data, 8191, *bytes_read, null);

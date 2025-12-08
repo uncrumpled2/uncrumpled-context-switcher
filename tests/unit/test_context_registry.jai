@@ -21,6 +21,8 @@ switch_context_from_input :: (registry: *Context_Registry, input: string) -> boo
     // Convert Table(string, Arg_Value) to separate args and flags tables
     args_table: Table(string, string);
     flags_table: Table(string, bool);
+    init(*args_table);
+    init(*flags_table);
     defer deinit(*args_table);
     defer deinit(*flags_table);
 

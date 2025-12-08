@@ -399,6 +399,32 @@ handle_context_get :: (config: *CLI_Config) -> bool {
     return true;
 }
 
+// Handle context list
+handle_context_list :: (config: *CLI_Config) -> bool {
+    sock, success := connect_to_daemon(config.socket_path);
+    if !success {
+        print("Error: Could not connect to daemon at %\n", config.socket_path);
+        return false;
+    }
+    defer cli_close(sock);
+
+    response, ok := send_request(sock, "context.list");
+    if !ok {
+        print("Error: Failed to receive response\n");
+        return false;
+    }
+    defer free(response);
+
+    if config.output_json {
+        print("%\n", response);
+    } else {
+        print("Context List:\n");
+        print("  %\n", response);
+    }
+
+    return true;
+}
+
 // Handle context add-tag
 handle_context_add_tag :: (config: *CLI_Config) -> bool {
     if config.args.count < 1 {
@@ -613,6 +639,8 @@ main :: () {
 
             if subcommand == "get" {
                 success = handle_context_get(*config);
+            } else if subcommand == "list" {
+                success = handle_context_list(*config);
             } else if subcommand == "add-tag" {
                 success = handle_context_add_tag(*config);
             } else if subcommand == "remove-tag" {

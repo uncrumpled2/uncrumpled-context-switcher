@@ -77,10 +77,15 @@ init_context_registry :: (registry: *Context_Registry, auto_create := false, max
     registry.auto_create = auto_create;
     registry.max_history = max_history;
 
+    // Initialize hash table for definitions
+    init(*registry.definitions);
+
     // Initialize active context to empty
     registry.active.name = copy_string("");
     registry.active.raw_input = copy_string("");
     registry.active.switched_at = current_time_consensus();
+    init(*registry.active.args);
+    init(*registry.active.flags);
 }
 
 // Cleanup the context registry
@@ -225,7 +230,12 @@ switch_context_by_input :: (registry: *Context_Registry, name: string, args: *Ta
         if !registry.auto_create {
             return false, tprint("Context '%' is not defined", name);
         }
-        // Auto-create mode: allow undefined contexts
+        // Auto-create mode: create a minimal definition for the context
+        new_def: Context_Definition;
+        new_def.name = copy_string(name);
+        new_def.description = copy_string("");
+        // args array is already zero-initialized
+        table_set(*registry.definitions, copy_string(name), new_def);
     } else {
         // Validate arguments against schema
         valid, err := validate_args_against_schema(*def, args, flags);
@@ -429,7 +439,7 @@ copy_active_context :: (src: *Active_Context) -> Active_Context {
     return dst;
 }
 
-// Free active context data
+// Free active context data and reinitialize for reuse
 free_active_context :: (ctx: *Active_Context) {
     free(ctx.name);
     free(ctx.raw_input);
@@ -445,9 +455,11 @@ free_active_context :: (ctx: *Active_Context) {
     }
     deinit(*ctx.flags);
 
-    // Reset to empty state
+    // Reset to empty state and reinitialize tables for reuse
     ctx.name = copy_string("");
     ctx.raw_input = copy_string("");
+    init(*ctx.args);
+    init(*ctx.flags);
 }
 
 // ============================================================================
@@ -496,6 +508,10 @@ init_context_store :: (store: *Context_Store, persistence_path := "") {
     store.ctx_data.environment = copy_string("dev");
     store.ctx_data.version = 0;
     store.ctx_data.last_modified = current_time_consensus();
+
+    // Initialize hash tables (required before use)
+    init(*store.ctx_data.workspace_metadata);
+    init(*store.ctx_data.user_params);
 
     // Try to load from persistence if path is set
     if persistence_path.count > 0 {
@@ -797,6 +813,10 @@ copy_context :: (src: *Context) -> Context {
     for src.tags {
         array_add(*dst.tags, copy_string(it));
     }
+
+    // Initialize hash tables before use
+    init(*dst.workspace_metadata);
+    init(*dst.user_params);
 
     // Copy workspace metadata
     for src.workspace_metadata {

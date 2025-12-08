@@ -165,7 +165,7 @@ get_daemon_path :: () -> string {
 
         // Build daemon path
         dir := slice(exe_path, 0, last_sep + 1);
-        return tprint("%0%", dir, DAEMON_EXECUTABLE);
+        return sprint("%0%", dir, DAEMON_EXECUTABLE);
     } else {
         // On Unix, use /proc/self/exe or similar
         // For now, assume daemon is in same directory
